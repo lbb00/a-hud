@@ -13,7 +13,7 @@ Context █████░░░░░ 45% │ 5h █░░░░ 25% │ 7d █
 ## Install
 
 ```bash
-npm install -g @lbb00/ahud
+npm install -g a-hud
 ```
 
 This installs the `ahud` binary standalone, independent of the Codex/Claude

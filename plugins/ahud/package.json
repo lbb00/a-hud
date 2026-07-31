@@ -1,14 +1,14 @@
 {
-  "name": "@lbb00/ahud",
+  "name": "a-hud",
   "version": "0.0.0-development",
   "description": "One terminal HUD for Codex and Claude Code",
   "type": "module",
   "bin": {
-    "ahud": "./src/cli.mjs"
+    "ahud": "src/cli.mjs"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/lbb00/ahud.git",
+    "url": "git+https://github.com/lbb00/a-hud.git",
     "directory": "plugins/ahud"
   },
   "scripts": {
