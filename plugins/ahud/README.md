@@ -10,6 +10,16 @@ Context █████░░░░░ 45% │ 5h █░░░░ 25% │ 7d █
 ▸ Implement Claude/Codex HUD (1/3)
 ```
 
+## Install
+
+```bash
+npm install -g ahud
+```
+
+This installs the `ahud` binary standalone, independent of the Codex/Claude
+Code plugin marketplace flow described below — useful for scripting or for
+hosts this project doesn't package a plugin manifest for yet.
+
 ## Why two display adapters?
 
 Claude Code accepts an arbitrary statusline command and passes native context
@@ -25,6 +35,9 @@ This keeps one codebase without depending on Codex's unstable transcript JSONL
 format.
 
 ## Commands
+
+Once installed via npm, the same commands are available as `ahud <command>`.
+Running from a plugin checkout instead, use `node src/cli.mjs <command>`:
 
 ```bash
 node src/cli.mjs demo
