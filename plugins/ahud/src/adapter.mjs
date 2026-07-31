@@ -9,10 +9,18 @@ export function adapterPathFor(home = os.homedir()) {
 // Races a promise against a timer so a hung top-level await (or a slow
 // render call) can never block the caller past `timeoutMs`. The loser is
 // simply left to resolve/reject on its own later — we don't cancel it.
+//
+// The timer is deliberately NOT unref()'d: an unref'd timer lets Node
+// consider the event loop "empty" while the raced-against promise (e.g. a
+// module whose top-level await never resolves) is still formally pending,
+// which trips node:test's own leak diagnostic ("Promise resolution is
+// still pending but the event loop has already resolved") and cancels
+// unrelated later tests in the same run. Keeping the timer ref'd bounds
+// the wait to `timeoutMs` (at most 100ms in practice) in exchange for
+// never producing that false-positive.
 function withTimeout(promise, timeoutMs, message) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
-    timer.unref?.();
     promise.then(
       (value) => {
         clearTimeout(timer);
