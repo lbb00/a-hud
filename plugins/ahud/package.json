@@ -1,0 +1,19 @@
+{
+  "name": "ahud",
+  "version": "0.1.1",
+  "description": "One terminal HUD for Codex and Claude Code",
+  "type": "module",
+  "bin": {
+    "ahud": "./src/cli.mjs"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:e2e": "node test/e2e/run.mjs",
+    "demo": "node src/cli.mjs demo",
+    "check": "node --check src/cli.mjs && node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}

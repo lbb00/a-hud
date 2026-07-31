@@ -1,0 +1,25 @@
+{
+  "name": "ahud",
+  "owner": {
+    "name": "ahud contributors"
+  },
+  "metadata": {
+    "description": "One HUD for Codex and Claude Code",
+    "version": "0.1.1"
+  },
+  "plugins": [
+    {
+      "name": "ahud",
+      "source": "./plugins/ahud",
+      "description": "Shared context, usage, tool, subagent, and plan HUD for Codex and Claude Code.",
+      "category": "monitoring",
+      "tags": [
+        "hud",
+        "statusline",
+        "claude-code",
+        "codex",
+        "agents"
+      ]
+    }
+  ]
+}
