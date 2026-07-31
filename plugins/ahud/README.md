@@ -5,10 +5,12 @@ One local HUD core for both Codex and Claude Code.
 ```text
 [Codex · gpt-5.6-sol · high] │ ahud git:(main*)
 Context █████░░░░░ 45% │ 5h █░░░░ 25% │ 7d █░░░░ 11%
-◐ apply_patch render.mjs │ ✓ Read
+◐ apply_patch render.mjs
 ◐ reviewer
 ▸ Implement Claude/Codex HUD (1/3)
 ```
+
+The block above is the literal output of `ahud demo` (run it yourself to see it in color).
 
 ## Install
 

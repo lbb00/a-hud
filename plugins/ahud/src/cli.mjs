@@ -117,9 +117,9 @@ function demo() {
       { type: "reviewer", status: "running" },
     ],
     plan: [
-      { text: "确定统一事件模型", status: "completed" },
-      { text: "实现 Claude/Codex HUD", status: "in_progress" },
-      { text: "完成验证", status: "pending" },
+      { text: "Design the shared event model", status: "completed" },
+      { text: "Implement Claude/Codex HUD", status: "in_progress" },
+      { text: "Verify end to end", status: "pending" },
     ],
   };
   process.stdout.write(`${renderSnapshot(snapshot)}\n`);
