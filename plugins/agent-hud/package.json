@@ -40,7 +40,7 @@
   "devDependencies": {
     "@agent-hud/provider": "0.1.0",
     "@types/node": "^24.10.1",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.28.1",
     "get-east-asian-width": "^1.6.0",
     "typescript": "^5.9.3"
   },
