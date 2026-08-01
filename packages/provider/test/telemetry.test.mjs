@@ -167,7 +167,8 @@ test("coalesces concurrent detached health refreshes with a private lease", asyn
   );
 });
 
-test("health refresh startup is fail-soft for an unwritable home", async () => {
+test("health refresh startup is fail-soft for an unwritable home", async (t) => {
+  if (process.platform === "win32") return t.skip("/dev/null is not an unwritable path on Windows");
   assert.equal(
     await spawnHealthRefresh("/missing/agent-hud-cli.js", "/dev/null"),
     false,

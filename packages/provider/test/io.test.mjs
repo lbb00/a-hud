@@ -44,11 +44,11 @@ test("uses one shared event directory across Codex and Claude environments", () 
       PLUGIN_DATA: "/tmp/codex-private",
       CLAUDE_PLUGIN_DATA: "/tmp/claude-private",
     }, "/Users/example"),
-    "/Users/example/.agent-hud/events",
+    path.join("/Users/example", ".agent-hud", "events"),
   );
   assert.equal(
     resolveDataDir({ AGENT_HUD_DATA_DIR: "/tmp/shared-hud" }, "/Users/example"),
-    "/tmp/shared-hud/events",
+    path.join("/tmp/shared-hud", "events"),
   );
 });
 

@@ -34,6 +34,22 @@ async function ensurePrivateFile(filePath) {
   } catch {
   }
 }
+var RENAME_RETRY_ATTEMPTS = 5;
+var RENAME_RETRY_DELAY_MS = 20;
+async function renameWithRetry(temporary, filePath) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await fs.rename(temporary, filePath);
+      return;
+    } catch (error) {
+      const code = errorCode(error);
+      if (attempt >= RENAME_RETRY_ATTEMPTS || code !== "EPERM" && code !== "EBUSY") {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, RENAME_RETRY_DELAY_MS));
+    }
+  }
+}
 async function atomicWritePrivate(filePath, contents) {
   const directory = path.dirname(filePath);
   const temporary = path.join(directory, `${HYGIENE_TEMP_PREFIX}${path.basename(filePath)}-${process.pid}-${randomUUID()}`);
@@ -41,7 +57,7 @@ async function atomicWritePrivate(filePath, contents) {
   try {
     await fs.writeFile(temporary, contents, { encoding: "utf8", mode: 384 });
     await ensurePrivateFile(temporary);
-    await fs.rename(temporary, filePath);
+    await renameWithRetry(temporary, filePath);
     await ensurePrivateFile(filePath);
   } catch (error) {
     try {

@@ -57,6 +57,28 @@ export async function ensurePrivateFile(filePath: string): Promise<void> {
   }
 }
 
+const RENAME_RETRY_ATTEMPTS = 5;
+const RENAME_RETRY_DELAY_MS = 20;
+
+// Windows can transiently deny a rename onto a destination another concurrent
+// writer's own rename is momentarily holding open (EPERM/EBUSY), even though
+// POSIX rename() is atomic and never does this. Retry a few times before
+// surfacing the error.
+async function renameWithRetry(temporary: string, filePath: string): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await fs.rename(temporary, filePath);
+      return;
+    } catch (error) {
+      const code = errorCode(error);
+      if (attempt >= RENAME_RETRY_ATTEMPTS || (code !== "EPERM" && code !== "EBUSY")) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, RENAME_RETRY_DELAY_MS));
+    }
+  }
+}
+
 export async function atomicWritePrivate(
   filePath: string,
   contents: string,
@@ -70,7 +92,7 @@ export async function atomicWritePrivate(
   try {
     await fs.writeFile(temporary, contents, { encoding: "utf8", mode: 0o600 });
     await ensurePrivateFile(temporary);
-    await fs.rename(temporary, filePath);
+    await renameWithRetry(temporary, filePath);
     await ensurePrivateFile(filePath);
   } catch (error) {
     try {
