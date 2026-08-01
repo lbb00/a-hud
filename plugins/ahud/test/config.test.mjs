@@ -281,6 +281,70 @@ test("loadConfig: codex.status_line does NOT validate token names — any non-em
 });
 
 // ---------------------------------------------------------------------------
+// loadConfig: hardening (invalid-shape known keys, prototype pollution,
+// oversized config file)
+// ---------------------------------------------------------------------------
+
+test("loadConfig: a known top-level key with the wrong shape (non-object) is ignored with a warning, not silently dropped", async (t) => {
+  const home = await mkHome();
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  await writeRawConfig(home, { ttl: "oops" });
+
+  const result = await loadConfig({ home });
+
+  assert.deepEqual(result.config.ttl, DEFAULTS.ttl);
+  assert.equal(result.warnings.length, 1);
+  assert.match(result.warnings[0], /"ttl"/);
+});
+
+test("loadConfig: a __proto__ key in the parsed JSON does not pollute Object.prototype or the returned config's own prototype", async (t) => {
+  const home = await mkHome();
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  await writeRawConfig(home, '{"__proto__": {"polluted": true}}');
+
+  const result = await loadConfig({ home });
+
+  assert.equal(Object.getPrototypeOf(result.config), Object.prototype);
+  assert.notEqual(result.config.polluted, true);
+  assert.notEqual({}.polluted, true, "Object.prototype itself must not be polluted");
+});
+
+test("loadConfig: a __proto__/constructor/prototype sub-key inside a known object is skipped, not merged", async (t) => {
+  const home = await mkHome();
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  // Written as a raw JSON string, not a JS object literal: `{ __proto__: ... }`
+  // in JS source sets the object's actual prototype at literal-construction
+  // time rather than creating an own enumerable property, so JSON.stringify
+  // would silently drop it and this test would prove nothing. JSON.parse of
+  // raw text, by contrast, creates a genuine own data property named
+  // "__proto__" — exactly the shape mergeInto's guard has to defend against.
+  await writeRawConfig(home, '{"ttl": {"__proto__": {"polluted": true}, "activeMin": 20}}');
+
+  const result = await loadConfig({ home });
+
+  assert.equal(result.config.ttl.activeMin, 20);
+  assert.equal(Object.getPrototypeOf(result.config.ttl), Object.prototype);
+  assert.notEqual(result.config.polluted, true);
+});
+
+test("loadConfig: a config.json larger than the size cap falls back to DEFAULTS with a warning instead of being parsed", async (t) => {
+  const home = await mkHome();
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  // Comfortably over the 256KB cap: a big padded string wrapped in otherwise
+  // valid JSON so this test would fail differently (JSON-parse error) if the
+  // size check weren't applied before parsing.
+  const big = { codex: { status_line: ["a".repeat(300 * 1024)] } };
+  await writeRawConfig(home, big);
+
+  const result = await loadConfig({ home });
+
+  assert.deepEqual(result.config, DEFAULTS);
+  assert.equal(result.exists, true);
+  assert.equal(result.warnings.length, 1);
+  assert.match(result.warnings[0], /too large/);
+});
+
+// ---------------------------------------------------------------------------
 // writeConfigPatch
 // ---------------------------------------------------------------------------
 

@@ -49,7 +49,9 @@ node src/cli.mjs setup both
 node src/cli.mjs watch --cwd "$PWD"
 ```
 
-Every config write is atomic and creates a timestamped backup first. Add
+Every config write is atomic. `ahud setup` also creates a timestamped backup
+of your existing Claude/Codex config file before overwriting it (ahud's own
+`~/.ahud/config.json` is written atomically but not backed up). Add
 `--dry-run` to inspect the result without changing anything.
 
 ## Plugin layout
@@ -92,8 +94,18 @@ be added, but existing fields are never removed or renamed.
 
 Loading or running the adapter is never allowed to take the HUD down: a
 missing file, a syntax error, a thrown exception, a non-string return value,
-or simply running too slow all fall back to the built-in renderer silently
-(the HUD keeps working; nothing hangs or crashes).
+or simply running too slow all fall back to the built-in renderer (the HUD
+keeps working; nothing hangs or crashes). A missing adapter file is silent
+(there's nothing to warn about); any other failure prints one warning to
+stderr per process so a broken adapter doesn't go unnoticed forever. "Too
+slow" is bounded by two different budgets: loading `~/.ahud/adapter.mjs` (a
+one-time cost at process startup, given more room for a cold-disk or
+NFS-mounted home directory) gets a looser timeout than each individual
+`render()` call (which runs on every refresh — every ~350ms inside `ahud
+watch`'s live loop — and so stays tight). Either timeout only bounds work
+that yields the event loop (e.g. `await`) — a synchronous infinite loop
+inside an adapter can still hang the process, so keep `render()`
+non-blocking.
 
 Set `"adapter": { "enabled": false }` in `~/.ahud/config.json` to turn the
 adapter off entirely, even if the file exists.

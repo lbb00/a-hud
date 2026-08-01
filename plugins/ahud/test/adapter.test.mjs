@@ -4,7 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { adapterPathFor, loadAdapter, renderWithAdapter } from "../src/adapter.mjs";
-import { bar, truncate, visibleLength } from "../src/render.mjs";
+import { bar } from "../src/render.mjs";
+import { truncate, visibleLength } from "../src/width.mjs";
 
 // --- fixtures -----------------------------------------------------------
 // Minimal but shape-complete snapshot/context, per the frozen contract in
