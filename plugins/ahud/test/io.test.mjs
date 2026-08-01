@@ -39,6 +39,16 @@ test("resolveDataDir's explicit AHUD_DATA_DIR wins even when PLUGIN_DATA is also
   );
 });
 
+test("resolveDataDir resolves a relative AHUD_DATA_DIR against home, not the caller's cwd (regression)", () => {
+  // A hook subprocess and an independently-launched watch/statusline process
+  // never share a cwd; resolving a relative override against each caller's
+  // own cwd would split writers from readers. It must anchor to `home`.
+  assert.equal(
+    resolveDataDir({ AHUD_DATA_DIR: ".cache/ahud" }, "/home/u"),
+    path.join("/home/u", ".cache/ahud", "events"),
+  );
+});
+
 test("normalizeCwd resolves a symlink to the same value as its real target", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "ahud-io-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

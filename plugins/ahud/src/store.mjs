@@ -8,17 +8,23 @@ import {
   resolveDataDir,
   safeText,
 } from "./io.mjs";
+import { detectHost } from "./hosts.mjs";
 
 const DEFAULT_TTL = { activeMin: 15, recentMin: 5 };
 
+// Event storage garbage collection: ~/.ahud/events/*.jsonl files are only
+// ever appended to, never deleted on their own, so without this the
+// directory grows unboundedly over months of use. Cleanup is opportunistic
+// and gated by a stamp file so the common case (most recordHook() calls)
+// costs exactly one extra fs.stat — the full sweep only runs at most once
+// per GC_INTERVAL_MS.
+const GC_STAMP_FILE = ".gc-stamp";
+const GC_INTERVAL_MS = 24 * 60 * 60 * 1000; // run the sweep at most once/24h
+const GC_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // delete events older than 7d
+const GC_MAX_FILES = 100; // then cap total session files, evicting oldest-mtime first
+
 export function detectPlatform(input, env) {
-  if (env.PLUGIN_ROOT || String(input.transcript_path || "").includes("/.codex/")) {
-    return "codex";
-  }
-  if (env.CLAUDE_PLUGIN_ROOT || String(input.transcript_path || "").includes("/.claude/")) {
-    return "claude";
-  }
-  return "agent";
+  return detectHost(input, env);
 }
 
 function sessionKey(input) {
@@ -106,11 +112,91 @@ export function normalizeHookEvent(input, env = process.env, now = Date.now()) {
   return event;
 }
 
+// Opportunistically sweeps `dataDir` in two passes — age first (anything
+// older than GC_MAX_AGE_MS), then an LRU-style count cap (if more than
+// GC_MAX_FILES survive, delete the oldest-by-mtime ones until back at the
+// cap) — gated by a stamp file so this only actually stats every event
+// file once per GC_INTERVAL_MS. The count cap exists because age alone
+// doesn't bound disk usage: many short-lived sessions in a single day (lots
+// of terminal tabs, rapid project switching) can all stay under 7 days old
+// while still accumulating unboundedly. mtime is what candidateFiles()
+// already sorts recency by elsewhere in this file, so "oldest mtime" here
+// is exactly "least recently used". Mirrors candidateFiles()'s defensive
+// style: any fs failure here is swallowed, never thrown — hook telemetry
+// cleanup must never block the hook's own ack.
+//
+// The stamp file is intentionally written one directory above `dataDir`
+// (dataDir's parent, e.g. ~/.ahud/ alongside config.json — not inside
+// ~/.ahud/events/ itself) rather than as a literal sibling of the .jsonl
+// files: several callers (including this project's own tests) list
+// `dataDir`'s contents expecting only session event files there, and a
+// stray non-event entry in that exact directory is observable to them.
+// Parking the stamp one level up keeps the events directory containing
+// nothing but `*.jsonl` while still gating on a stable, per-user path.
+async function collectGarbage(dataDir, now) {
+  const stampPath = path.join(path.dirname(dataDir), GC_STAMP_FILE);
+  let stampStat = null;
+  try {
+    stampStat = await fs.stat(stampPath);
+  } catch {
+    // Missing stamp file means "never swept" — fall through and run.
+  }
+  if (stampStat && now - stampStat.mtimeMs < GC_INTERVAL_MS) return;
+
+  try {
+    await fs.writeFile(stampPath, String(now), { encoding: "utf8", mode: 0o600 });
+  } catch {
+    // If we can't write the stamp we'll just re-check next time; still
+    // attempt the sweep below.
+  }
+
+  let entries;
+  try {
+    entries = await fs.readdir(dataDir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  const survivors = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+    const filePath = path.join(dataDir, entry.name);
+    try {
+      const stat = await fs.stat(filePath);
+      if (now - stat.mtimeMs > GC_MAX_AGE_MS) {
+        await fs.unlink(filePath);
+        continue;
+      }
+      survivors.push({ filePath, mtimeMs: stat.mtimeMs });
+    } catch {
+      // File may already be gone, or briefly unreadable; never block on it.
+    }
+  }
+
+  if (survivors.length > GC_MAX_FILES) {
+    survivors.sort((a, b) => a.mtimeMs - b.mtimeMs); // oldest (least recently used) first
+    const evictCount = survivors.length - GC_MAX_FILES;
+    for (const { filePath } of survivors.slice(0, evictCount)) {
+      try {
+        await fs.unlink(filePath);
+      } catch {
+        // Same tolerance as the age-based pass above.
+      }
+    }
+  }
+}
+
 export async function recordHook(input, options = {}) {
   const dataDir = options.dataDir || resolveDataDir(options.env);
-  const event = normalizeHookEvent(input, options.env, options.now?.() ?? Date.now());
+  const now = options.now?.() ?? Date.now();
+  const event = normalizeHookEvent(input, options.env, now);
   const filePath = eventFileFor(dataDir, event.sessionId);
   await appendJsonLine(filePath, event);
+  try {
+    await collectGarbage(dataDir, now);
+  } catch {
+    // Cleanup is opportunistic and must never block the hook's own ack.
+  }
   return { event, filePath };
 }
 
@@ -225,6 +311,17 @@ export async function loadState(query = {}, options = {}) {
     }
   }
 
+  // Whether the caller gave us anything at all to match against. When
+  // true, a miss below must return an idle/empty state rather than
+  // falling back to an arbitrary recent session's state — otherwise a
+  // brand-new session (or one whose own exact-match file hasn't been
+  // written yet) could leak an unrelated session's/project's state, which
+  // is exactly the cross-project leak this guards against. sessionId is
+  // included here (not just transcriptPath/cwd): an exact-match miss above
+  // (e.g. a fresh session with no events yet) must not fall through to
+  // "no filter" behavior just because cwd/transcriptPath weren't passed.
+  const hasFilter = Boolean(query.transcriptPath || query.cwd || query.sessionId);
+
   const files = await candidateFiles(dataDir);
   let fallback = null;
   for (const { filePath } of files) {
@@ -237,7 +334,7 @@ export async function loadState(query = {}, options = {}) {
       // local CLI's --cwd/process.cwd(); their string forms don't always
       // match exactly (symlinks, trailing slashes), so compare normalized.
       if (query.cwd && state.cwd && normalizeCwd(query.cwd) === normalizeCwd(state.cwd)) return state;
-      fallback ||= state;
+      if (!hasFilter) fallback ||= state;
     } catch {
       // Ignore a corrupt or concurrently removed session.
     }

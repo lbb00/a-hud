@@ -197,3 +197,207 @@ test("loadState passes options.ttl through to foldEvents so a tight ttl expires 
   );
   assert.equal(withTightTtl.tools.length, 0);
 });
+
+// ---------------------------------------------------------------------------
+// loadState: an unmatched cwd/transcriptPath filter must not leak another
+// project's activity (regression — previously fell back to the most
+// recently active session across ALL projects).
+// ---------------------------------------------------------------------------
+
+test("loadState does not leak another project's tools when the requested cwd matches no session", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "ahud-store-crossproject-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const recordOptions = { dataDir: root, env: {}, now: () => 0 };
+
+  await recordHook({
+    session_id: "thr_other_project",
+    cwd: "/workspace/other-project",
+    hook_event_name: "PostToolUse",
+    tool_name: "Bash",
+  }, recordOptions);
+
+  const state = await loadState(
+    { cwd: "/workspace/my-new-project" },
+    { dataDir: root, now: () => 1_000 },
+  );
+  assert.equal(state.tools.length, 0);
+  assert.equal(state.cwd, "");
+});
+
+test("loadState still falls back to the most recent session when no cwd/transcriptPath filter is given at all", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "ahud-store-nofilter-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const recordOptions = { dataDir: root, env: {}, now: () => 0 };
+
+  await recordHook({
+    session_id: "thr_only_session",
+    cwd: "/workspace/only-project",
+    hook_event_name: "PostToolUse",
+    tool_name: "Bash",
+  }, recordOptions);
+
+  const state = await loadState({}, { dataDir: root, now: () => 1_000 });
+  assert.equal(state.tools.length, 1);
+});
+
+// loadState: hasFilter must also treat a lone query.sessionId as a filter
+// (cross-project leak regression — see the existing "brand new session"
+// scenario this mirrors: loadState({ sessionId }) whose exact-match file
+// doesn't exist yet must not fall through to returning an unrelated
+// session's state just because cwd/transcriptPath weren't passed either).
+// ---------------------------------------------------------------------------
+
+test("loadState: a sessionId with no matching file and no cwd/transcriptPath returns idle state, not an unrelated session's state (cross-project leak regression)", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "ahud-store-leak-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const options = { dataDir: root, env: {}, now: () => 1_000 };
+
+  // An unrelated, already-active session in the same data dir.
+  await recordHook({
+    session_id: "unrelated-session",
+    hook_event_name: "SessionStart",
+    cwd: "/workspace/other-project",
+    transcript_path: "/tmp/other-session.jsonl",
+    model: "gpt-other",
+  }, options);
+
+  // A brand-new session with no events yet: its own exact-match file
+  // doesn't exist, and no cwd/transcriptPath was given to match against.
+  const state = await loadState({ sessionId: "brand-new-session" }, { dataDir: root, now: () => 2_000 });
+
+  assert.equal(state.status, "idle");
+  assert.equal(state.sessionId, "");
+  assert.equal(state.cwd, "");
+  assert.notEqual(state.model, "gpt-other", "must not leak the unrelated session's state");
+});
+
+// ---------------------------------------------------------------------------
+// recordHook: opportunistic event storage garbage collection (Task 3).
+//
+// GC is gated by a stamp file written one directory above `dataDir` (see
+// collectGarbage()'s comment in store.mjs) so these tests set up
+// `<root>/events` as dataDir and inspect `<root>/.gc-stamp`.
+// ---------------------------------------------------------------------------
+
+const GC_STAMP_FILE = ".gc-stamp";
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+
+async function gcTestDirs() {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "ahud-store-gc-"));
+  const dataDir = path.join(root, "events");
+  await fs.mkdir(dataDir, { recursive: true });
+  return { root, dataDir };
+}
+
+async function writeAgedEventFile(dataDir, name, ageMs, now) {
+  const filePath = path.join(dataDir, name);
+  await fs.writeFile(filePath, `${JSON.stringify({ v: 1, at: now - ageMs, sessionId: name })}\n`);
+  const mtime = new Date(now - ageMs);
+  await fs.utimes(filePath, mtime, mtime);
+  return filePath;
+}
+
+test("recordHook GC: a .jsonl file older than 7 days is removed once the stamp-file gate is forced open (missing stamp)", async (t) => {
+  const { root, dataDir } = await gcTestDirs();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const now = 100_000_000;
+  const oldFile = await writeAgedEventFile(dataDir, "old-session.jsonl", SEVEN_DAYS_MS + 60_000, now);
+
+  await recordHook({
+    session_id: "fresh-session",
+    hook_event_name: "SessionStart",
+    cwd: "/workspace/demo",
+  }, { dataDir, env: {}, now: () => now });
+
+  await assert.rejects(fs.access(oldFile), "a .jsonl file older than 7 days should have been deleted");
+  await assert.doesNotReject(fs.access(path.join(root, GC_STAMP_FILE)), "the gc stamp file should have been (re)written");
+});
+
+test("recordHook GC: a .jsonl file within 7 days survives the sweep", async (t) => {
+  const { root, dataDir } = await gcTestDirs();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const now = 100_000_000;
+  const recentFile = await writeAgedEventFile(dataDir, "recent-session.jsonl", SEVEN_DAYS_MS - 60_000, now);
+
+  await recordHook({
+    session_id: "fresh-session",
+    hook_event_name: "SessionStart",
+    cwd: "/workspace/demo",
+  }, { dataDir, env: {}, now: () => now });
+
+  await assert.doesNotReject(fs.access(recentFile), "a .jsonl file within 7 days must survive");
+});
+
+test("recordHook GC: once more than 100 files survive the age pass, the oldest-mtime ones are evicted down to 100 (LRU cap)", async (t) => {
+  const { root, dataDir } = await gcTestDirs();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const now = 100_000_000;
+  // 105 files, all well within the 7-day age cutoff, but with distinct
+  // mtimes (oldest = index 0) so eviction order is unambiguous.
+  const files = [];
+  for (let i = 0; i < 105; i += 1) {
+    // Newer index -> smaller age -> newer mtime, so index 0 is oldest.
+    const ageMs = (105 - i) * 1_000;
+    files.push(await writeAgedEventFile(dataDir, `session-${i}.jsonl`, ageMs, now));
+  }
+
+  await recordHook({
+    session_id: "fresh-session",
+    hook_event_name: "SessionStart",
+    cwd: "/workspace/demo",
+  }, { dataDir, env: {}, now: () => now });
+
+  const remaining = await fs.readdir(dataDir);
+  // 105 pre-existing + 1 just-written fresh-session file = 106 candidates,
+  // capped down to 100.
+  assert.equal(remaining.length, 100);
+  await assert.rejects(fs.access(files[0]), "the single oldest file must have been evicted first");
+  await assert.doesNotReject(fs.access(files[104]), "the newest of the pre-existing files must survive");
+});
+
+test("recordHook GC: at or under 100 files, none are evicted by the count cap", async (t) => {
+  const { root, dataDir } = await gcTestDirs();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const now = 100_000_000;
+  const files = [];
+  for (let i = 0; i < 99; i += 1) {
+    files.push(await writeAgedEventFile(dataDir, `session-${i}.jsonl`, (99 - i) * 1_000, now));
+  }
+
+  await recordHook({
+    session_id: "fresh-session",
+    hook_event_name: "SessionStart",
+    cwd: "/workspace/demo",
+  }, { dataDir, env: {}, now: () => now });
+
+  // 99 pre-existing + 1 fresh = 100, exactly at the cap.
+  const remaining = await fs.readdir(dataDir);
+  assert.equal(remaining.length, 100);
+  for (const filePath of files) {
+    await assert.doesNotReject(fs.access(filePath));
+  }
+});
+
+test("recordHook GC: a recent stamp file (< 24h old) keeps the gate closed — no sweep runs at all, even against a >7-day-old file", async (t) => {
+  const { root, dataDir } = await gcTestDirs();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const now = 100_000_000;
+  const oldFile = await writeAgedEventFile(dataDir, "old-session.jsonl", SEVEN_DAYS_MS + 60_000, now);
+
+  const stampPath = path.join(root, GC_STAMP_FILE);
+  await fs.writeFile(stampPath, "seed");
+  const recentStamp = new Date(now - (TWENTY_FOUR_HOURS_MS - 60_000));
+  await fs.utimes(stampPath, recentStamp, recentStamp);
+  const stampMtimeBefore = (await fs.stat(stampPath)).mtimeMs;
+
+  await recordHook({
+    session_id: "fresh-session",
+    hook_event_name: "SessionStart",
+    cwd: "/workspace/demo",
+  }, { dataDir, env: {}, now: () => now });
+
+  await assert.doesNotReject(fs.access(oldFile), "gate should stay closed: the >7-day-old file must survive untouched");
+  const stampMtimeAfter = (await fs.stat(stampPath)).mtimeMs;
+  assert.equal(stampMtimeAfter, stampMtimeBefore, "the stamp file itself must not be rewritten while the gate is closed");
+});

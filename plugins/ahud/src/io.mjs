@@ -29,7 +29,13 @@ export function resolveDataDir(env = process.env, home = os.homedir()) {
   // the hook writer and the HUD reader disagree on the data directory. A
   // fixed, home-relative default (overridable via AHUD_DATA_DIR) keeps both
   // sides in agreement.
-  const base = env.AHUD_DATA_DIR || path.join(home, ".ahud");
+  // A relative AHUD_DATA_DIR must resolve the same way for every caller: a
+  // hook subprocess and an independently-launched watch/statusline process
+  // never share a cwd, so resolving against process.cwd() (path.join's
+  // default when given a relative base) would silently split writers from
+  // readers. Anchoring to `home` instead keeps them in agreement; an
+  // absolute AHUD_DATA_DIR is used as-is.
+  const base = env.AHUD_DATA_DIR ? path.resolve(home, env.AHUD_DATA_DIR) : path.join(home, ".ahud");
   return path.join(base, "events");
 }
 
