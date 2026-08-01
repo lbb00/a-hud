@@ -55,7 +55,38 @@ export const CODEX_PRESETS = {
 };
 
 const TUI_KEYS = new Set(["status_line", "status_line_use_colors", "terminal_title"]);
-const TABLE_RE = /^\s*\[\[?[^\]]+\]\]?\s*(?:#.*)?$/;
+// A table header's key path is a dot-separated sequence of segments, each
+// either bare or quoted — and a *quoted* segment (`"other]table"`) may
+// contain characters like "]" or "." that would otherwise look like the
+// end of the header or a path separator. Naively matching "everything up
+// to the first ]" (the previous `[^\]]+`) breaks on such a segment: it
+// would stop at the "]" *inside* the quotes, misreading the true end of
+// the table's body and silently deleting whatever lines actually belong to
+// the table that follows.
+const TOML_KEY_SEGMENT = `(?:"(?:[^"\\\\]|\\\\.)*"|'[^']*'|[^"'\\]. ]+)`;
+const TABLE_RE = new RegExp(
+  `^\\s*\\[\\[?\\s*${TOML_KEY_SEGMENT}(?:\\s*\\.\\s*${TOML_KEY_SEGMENT})*\\s*\\]\\]?\\s*(?:#.*)?$`,
+);
+
+// TOML keys may be quoted (`"status_line" = [...]` or `'status_line' = [...]`)
+// as well as bare. Strips one matching pair of surrounding quotes so a
+// hand-quoted key still matches TUI_KEYS — otherwise it'd be left in `kept`
+// alongside the newly written unquoted key, producing a duplicate-key TOML
+// document (invalid — smol-toml, and Codex's own TOML parser, both reject
+// "trying to redefine an already defined ... value"). This is a literal
+// quote-stripping match, not full TOML string decoding: a basic-string key
+// spelled with a backslash escape sequence that decodes to one of
+// TUI_KEYS still won't match this literal comparison. Like triple-quoted
+// strings elsewhere in this file, that's an
+// accepted, undocumented-in-practice gap — this project's own writer only
+// ever produces plain bare keys, and no realistic hand-edit uses a Unicode
+// escape to spell an ASCII identifier.
+function normalizeTomlKey(key) {
+  if (key.length >= 2 && ((key[0] === '"' && key.at(-1) === '"') || (key[0] === "'" && key.at(-1) === "'"))) {
+    return key.slice(1, -1);
+  }
+  return key;
+}
 
 function tomlValue(value) {
   return Array.isArray(value)
@@ -63,13 +94,35 @@ function tomlValue(value) {
     : String(value);
 }
 
-// Counts net bracket depth in a line (each "[" is +1, each "]" is -1). This
-// project's own TOML output only ever contains simple string array elements
-// (no nested arrays, no inline comments), so a naive per-character count is
-// enough to track whether an array value opened on this line has closed yet.
+// Counts net bracket depth in a line (each unquoted "[" is +1, each
+// unquoted "]" is -1), stopping at an unquoted "#" (a real TOML comment).
+// Tracks whether we're currently inside a TOML basic string (") or literal
+// string (') so a literal "#", "[", or "]" *value* — e.g.
+// `status_line = ["model", "#"]` — isn't mistaken for a comment marker or
+// counted as a bracket. Basic strings support backslash-escaping (so `\"`
+// doesn't end the string); literal strings don't. Triple-quoted
+// (multi-line) strings are intentionally not handled: this project's own
+// TOML writer never produces them, so that's an accepted, undocumented gap
+// rather than something worth the extra complexity here.
 function bracketDelta(text) {
+  const withoutComment = text.split("#")[0];
   let delta = 0;
-  for (const char of text) {
+  let quote = null; // '"' or "'" while inside a string, else null
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    if (quote) {
+      if (char === "\\" && quote === '"') {
+        i += 1; // skip the escaped character (basic strings only)
+        continue;
+      }
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === "#") break;
     if (char === "[") delta += 1;
     else if (char === "]") delta -= 1;
   }
@@ -108,7 +161,37 @@ export function patchCodexConfig(text, fields) {
   const values = { ...fields, status_line_use_colors: true };
   const block = Object.entries(values).map(([key, value]) => `${key} = ${tomlValue(value)}`);
   const lines = text.split(/\r?\n/);
-  const index = lines.findIndex((line) => /^\s*\[tui\]\s*(?:#.*)?$/.test(line));
+  // TOML lets the root table define `tui` without a `[tui]` header at all:
+  // as an inline table (`tui = { status_line = [...], ... }`), a quoted
+  // key (`"tui" = { ... }`), or dotted keys (`tui.status_line = [...]`).
+  // Detecting one of those as "[tui] already exists" and safely rewriting
+  // it would need real TOML value parsing (matching balanced braces,
+  // respecting quoted strings that might contain "}", decoding dotted-key
+  // paths), which this line-oriented rewriter doesn't do — and blindly
+  // appending a `[tui]` table header below would leave BOTH definitions in
+  // the file, which is invalid TOML (a redefined table). Refuse instead of
+  // writing something broken.
+  //
+  // Only the ROOT table's lines count: a `tui = { ... }` (or `tui.x = `)
+  // line can only define a *root*-level `tui` when it appears before the
+  // first `[section]` header — the same line appearing after, say, an
+  // `[other]` header defines `other.tui`, a different, unrelated key that
+  // this rewriter must leave completely alone.
+  const firstHeaderIndex = lines.findIndex((line) => /^\s*\[/.test(line));
+  const rootLines = firstHeaderIndex < 0 ? lines : lines.slice(0, firstHeaderIndex);
+  const ROOT_TUI_RE = /^\s*(?:tui|"tui"|'tui')\s*(?:=\s*\{|\.)/;
+  if (rootLines.some((line) => ROOT_TUI_RE.test(line))) {
+    throw new Error(
+      "config.toml defines the root-level tui key without a [tui] table header " +
+        "(inline table, or dotted keys); ahud can't safely rewrite that form — " +
+        "convert it to a [tui] table first",
+    );
+  }
+  // A TOML table header's name may be bare (`[tui]`) or quoted (`["tui"]` /
+  // `['tui']`) — all three spell the same table. Missing the quoted forms
+  // would append a second `[tui]` header, producing invalid TOML (a
+  // duplicate table definition).
+  const index = lines.findIndex((line) => /^\s*\[\s*(?:tui|"tui"|'tui')\s*\]\s*(?:#.*)?$/.test(line));
 
   if (index < 0) {
     const childIndex = lines.findIndex((line) => /^\s*\[\[?tui\./.test(line));
@@ -127,7 +210,7 @@ export function patchCodexConfig(text, fields) {
     const line = lines[i];
     const trimmed = line.trim();
     const eqIndex = trimmed.indexOf("=");
-    const key = eqIndex >= 0 ? trimmed.slice(0, eqIndex).trim() : trimmed;
+    const key = eqIndex >= 0 ? normalizeTomlKey(trimmed.slice(0, eqIndex).trim()) : trimmed;
     if (TUI_KEYS.has(key)) {
       // Skip this key's line, and if its value is an array that spans
       // multiple lines (bracket not closed on this line), skip the
@@ -161,6 +244,14 @@ export function posixQuote(value) {
 export function patchClaudeSettings(text, options = {}) {
   const { executable = process.execPath, cliPath = CLI_PATH, refreshInterval = 5 } = options;
   const parsed = text.trim() ? JSON.parse(text) : {};
+  // A JSON array parses without error but silently drops any non-index
+  // property (like statusLine) when re-stringified, so a bare array
+  // settings.json would otherwise round-trip byte-for-byte unchanged —
+  // writeWithBackup would then see content === original and report
+  // "already configured" despite statusLine never actually being set.
+  if (Array.isArray(parsed) || typeof parsed !== "object" || parsed === null) {
+    throw new Error("Claude settings file must be a JSON object");
+  }
   parsed.statusLine = {
     type: "command",
     command: `${posixQuote(executable)} ${posixQuote(cliPath)} statusline`,

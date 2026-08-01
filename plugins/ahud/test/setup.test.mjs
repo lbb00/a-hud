@@ -128,6 +128,103 @@ foo = 1
   assert.equal((result.match(/^\[tui\]$/gm) || []).length, 1);
 });
 
+test("removes a status_line line even when it carries a trailing comment containing a stray bracket (regression)", () => {
+  const before = `[tui]
+status_line = ["model"] # keep this short [wip]
+other_setting = true
+
+[other]
+foo = 1
+`;
+  const result = patchCodexConfig(before, CODEX_PRESETS.compact);
+  assert.ok(!result.includes("keep this short"));
+  assert.match(result, /other_setting = true/);
+  assert.match(result, /\[other\]\n\s*foo = 1/);
+});
+
+test("replaces a hand-quoted status_line key instead of leaving a duplicate, invalid-TOML remnant (regression)", () => {
+  const before = `[tui]
+"status_line" = ["model"]
+other_setting = true
+`;
+  const result = patchCodexConfig(before, CODEX_PRESETS.compact);
+  // Exactly one status_line assignment must survive — the quoted original
+  // must have been recognized and replaced, not kept alongside the new
+  // unquoted one (which would produce two competing definitions of the
+  // same key, invalid TOML).
+  assert.equal((result.match(/status_line\s*=/g) || []).length, 1);
+  assert.ok(!result.includes('"status_line" ='));
+  assert.match(result, /other_setting = true/);
+});
+
+test("replaces a hand-quoted terminal_title key using single-quote (literal string) syntax too", () => {
+  const before = `[tui]
+'terminal_title' = ["spinner"]
+`;
+  const result = patchCodexConfig(before, CODEX_PRESETS.compact);
+  assert.equal((result.match(/terminal_title\s*=/g) || []).length, 1);
+  assert.ok(!result.includes("'terminal_title' ="));
+});
+
+test("recognizes a quoted [tui] table header (`[\"tui\"]`) instead of appending a duplicate section (regression)", () => {
+  const before = `["tui"]
+status_line = ["model"]
+`;
+  const result = patchCodexConfig(before, CODEX_PRESETS.compact);
+  assert.equal((result.match(/^\["?tui"?\]$/gm) || []).length, 1);
+});
+
+test("recognizes a single-quoted [tui] table header (`['tui']`) too", () => {
+  const before = `['tui']
+status_line = ["model"]
+`;
+  const result = patchCodexConfig(before, CODEX_PRESETS.compact);
+  assert.equal((result.match(/^\['?tui'?\]$/gm) || []).length, 1);
+});
+
+test("refuses to rewrite an inline-table [tui] (`tui = { ... }`) instead of appending a duplicate, invalid definition (regression)", () => {
+  const before = `tui = { status_line = ["model"], terminal_title = ["project"], status_line_use_colors = false }
+`;
+  assert.throws(() => patchCodexConfig(before, CODEX_PRESETS.compact), /inline table/);
+});
+
+test("refuses a quoted-key inline-table root tui (`\"tui\" = { ... }`) too (regression)", () => {
+  const before = `"tui" = { status_line = ["old"], terminal_title = ["old"] }
+`;
+  assert.throws(() => patchCodexConfig(before, CODEX_PRESETS.compact), /inline table/);
+});
+
+test("refuses a dotted-key root tui (`tui.status_line = [...]`) too (regression)", () => {
+  const before = `tui.status_line = ["old"]
+tui.terminal_title = ["old"]
+`;
+  assert.throws(() => patchCodexConfig(before, CODEX_PRESETS.compact), /inline table/);
+});
+
+test("does NOT refuse when 'tui' is a key nested inside an unrelated table, e.g. [other] (regression — false-positive fix)", () => {
+  const before = `[other]
+tui = { keep = 1 }
+`;
+  const result = patchCodexConfig(before, CODEX_PRESETS.compact);
+  assert.match(result, /\[other\]/);
+  assert.match(result, /tui = \{ keep = 1 \}/);
+  assert.match(result, /^\[tui\]$/m);
+});
+
+test("a quoted table header whose name itself contains ']' does not get swallowed into [tui]'s body (regression)", () => {
+  const before = `[tui]
+status_line = ["old"]
+
+["other]table"]
+status_line = ["must-survive"]
+keep = 7
+`;
+  const result = patchCodexConfig(before, CODEX_PRESETS.compact);
+  assert.match(result, /\["other\]table"\]/);
+  assert.match(result, /status_line = \["must-survive"\]/);
+  assert.match(result, /keep = 7/);
+});
+
 test("patchCodexConfig is idempotent when the input already had a multi-line array remnant", () => {
   const before = `[tui]
 status_line = [
@@ -145,6 +242,40 @@ foo = 1
   assert.equal((twice.match(/^\[tui\]$/gm) || []).length, 1);
   assert.equal((twice.match(/^\[other\]$/gm) || []).length, 1);
   assert.match(twice, /\[other\]\n\s*foo = 1/);
+});
+
+test("patchCodexConfig does not desync bracket-depth counting on a literal \"#\" string VALUE inside an array (regression)", () => {
+  // `["model", "#"]` contains a literal "#" array element, not a comment.
+  // A comment/quote-unaware bracket counter risks mistaking it for the
+  // start of a comment (or otherwise mis-scanning it), which can desync
+  // the bracket-depth counter used to detect (and skip) a multi-line array
+  // continuation, corrupting/deleting unrelated following settings such as
+  // `other_setting = true`.
+  const before = `[tui]
+status_line = ["model", "#"]
+other_setting = true
+`;
+  const result = patchCodexConfig(before, CODEX_PRESETS.compact);
+  assert.match(result, /other_setting = true/, "an unrelated setting after the quoted \"#\" must survive");
+  assert.match(result, /status_line = \["model-with-reasoning"/);
+  assert.equal((result.match(/^\[tui\]$/gm) || []).length, 1);
+});
+
+test("patchCodexConfig does not desync bracket-depth counting on a stray unquoted \"[\" inside a trailing comment (regression — reproduces against the prior quote-unaware bracketDelta)", () => {
+  // The array closes on this line (`["model"]`), but the trailing comment
+  // itself contains an unquoted "[" with no matching "]" on the same line.
+  // A bracket counter that doesn't stop scanning at the (unquoted) "#"
+  // comment marker counts that stray "[" too, making net bracket depth > 0
+  // after this line and wrongly treating the next line as an array
+  // continuation to skip — deleting it. This exact input reproducibly
+  // deletes `other_setting = true` against the prior implementation.
+  const before = `[tui]
+status_line = ["model"]  # e.g. [tag
+other_setting = true
+`;
+  const result = patchCodexConfig(before, CODEX_PRESETS.compact);
+  assert.match(result, /other_setting = true/, "a setting after a comment containing a stray \"[\" must survive");
+  assert.equal((result.match(/^\[tui\]$/gm) || []).length, 1);
 });
 
 test("posixQuote wraps a value in single quotes, escaping embedded single quotes POSIX-style", () => {
@@ -169,6 +300,15 @@ test("posixQuote round-trips tricky strings through a real POSIX shell unharmed"
     const output = execFileSync("sh", ["-c", `printf '%s' ${quoted}`], { encoding: "utf8" });
     assert.equal(output, value, `round-trip failed for: ${value}`);
   }
+});
+
+test("patchClaudeSettings throws on a JSON array settings file instead of silently no-oping (regression)", () => {
+  // JSON.stringify drops non-index properties from an array, so setting
+  // parsed.statusLine on an array would round-trip back to the exact same
+  // text — writeWithBackup would then see content === original and report
+  // "already configured" despite statusLine never having been set.
+  assert.throws(() => patchClaudeSettings("[]"), /must be a JSON object/);
+  assert.throws(() => patchClaudeSettings("[1, 2, 3]"), /must be a JSON object/);
 });
 
 test("patchClaudeSettings builds statusLine.command from posixQuote, not JSON.stringify", () => {
