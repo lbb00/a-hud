@@ -13,6 +13,21 @@ export const DEFAULTS = {
 
 const KNOWN_TOP_KEYS = new Set(["enabled", "platforms", "adapter", "ttl", "claude", "codex"]);
 
+// Config values are parsed straight from untrusted JSON and then assigned
+// onto plain objects via `obj[key] = value` in mergeInto's loops below. A
+// literal "__proto__" key in that JSON, assigned with bracket notation,
+// triggers the inherited Object.prototype.__proto__ accessor and actually
+// reassigns the object's prototype (this is a real bracket-assignment
+// footgun, not a JSON.parse quirk — JSON.parse itself just makes it an own
+// data property when parsing into a fresh object literal, but a spread /
+// reassignment through `{ ...x }` followed by `obj[key] = value` re-triggers
+// the accessor). "constructor"/"prototype" are guarded against for the same
+// class of prototype-pollution risk. Every key-assignment loop in
+// mergeInto must run keys through this before writing them.
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+const MAX_CONFIG_BYTES = 256 * 1024;
+
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -48,6 +63,11 @@ function validateTokenList(value, warnings, label) {
 
 function mergeInto(config, parsed, warnings) {
   for (const [key, value] of Object.entries(parsed)) {
+    if (UNSAFE_KEYS.has(key)) {
+      warnings.push(`invalid top-level key "${key}": reserved for JavaScript's prototype machinery; ignoring`);
+      continue;
+    }
+
     if (!KNOWN_TOP_KEYS.has(key)) {
       config[key] = value;
       continue;
@@ -58,11 +78,18 @@ function mergeInto(config, parsed, warnings) {
       continue;
     }
 
-    if (!isPlainObject(value)) continue;
+    if (!isPlainObject(value)) {
+      warnings.push(`invalid "${key}": expected an object, got ${JSON.stringify(value)}; ignoring`);
+      continue;
+    }
 
     if (key === "platforms") {
       const platforms = { ...config.platforms };
       for (const [subKey, subValue] of Object.entries(value)) {
+        if (UNSAFE_KEYS.has(subKey)) {
+          warnings.push(`invalid "platforms.${subKey}": reserved for JavaScript's prototype machinery; ignoring`);
+          continue;
+        }
         platforms[subKey] = validateBoolean(subValue, warnings, `platforms.${subKey}`, true);
       }
       config.platforms = platforms;
@@ -72,6 +99,10 @@ function mergeInto(config, parsed, warnings) {
     if (key === "adapter") {
       const adapter = { ...config.adapter };
       for (const [subKey, subValue] of Object.entries(value)) {
+        if (UNSAFE_KEYS.has(subKey)) {
+          warnings.push(`invalid "adapter.${subKey}": reserved for JavaScript's prototype machinery; ignoring`);
+          continue;
+        }
         adapter[subKey] = subKey === "enabled"
           ? validateBoolean(subValue, warnings, "adapter.enabled", true)
           : subValue;
@@ -83,6 +114,10 @@ function mergeInto(config, parsed, warnings) {
     if (key === "ttl") {
       const ttl = { ...config.ttl };
       for (const [subKey, subValue] of Object.entries(value)) {
+        if (UNSAFE_KEYS.has(subKey)) {
+          warnings.push(`invalid "ttl.${subKey}": reserved for JavaScript's prototype machinery; ignoring`);
+          continue;
+        }
         if (subKey === "activeMin") ttl.activeMin = validateTtlMinutes(subValue, warnings, "ttl.activeMin", DEFAULTS.ttl.activeMin);
         else if (subKey === "recentMin") ttl.recentMin = validateTtlMinutes(subValue, warnings, "ttl.recentMin", DEFAULTS.ttl.recentMin);
         else ttl[subKey] = subValue;
@@ -94,6 +129,10 @@ function mergeInto(config, parsed, warnings) {
     if (key === "claude") {
       const claude = { ...config.claude };
       for (const [subKey, subValue] of Object.entries(value)) {
+        if (UNSAFE_KEYS.has(subKey)) {
+          warnings.push(`invalid "claude.${subKey}": reserved for JavaScript's prototype machinery; ignoring`);
+          continue;
+        }
         claude[subKey] = subKey === "refreshInterval"
           ? validateRefreshInterval(subValue, warnings, DEFAULTS.claude.refreshInterval)
           : subValue;
@@ -105,6 +144,10 @@ function mergeInto(config, parsed, warnings) {
     if (key === "codex") {
       const codex = { ...config.codex };
       for (const [subKey, subValue] of Object.entries(value)) {
+        if (UNSAFE_KEYS.has(subKey)) {
+          warnings.push(`invalid "codex.${subKey}": reserved for JavaScript's prototype machinery; ignoring`);
+          continue;
+        }
         codex[subKey] = subKey === "status_line" || subKey === "terminal_title"
           ? validateTokenList(subValue, warnings, `codex.${subKey}`)
           : subValue;
@@ -119,6 +162,25 @@ function mergeInto(config, parsed, warnings) {
 export async function loadConfig(options = {}) {
   const home = options.home ?? os.homedir();
   const filePath = configPathFor(home);
+
+  // Stat before reading: `watch`'s live loop calls loadConfig() roughly
+  // every 350ms, so an absurdly large config.json would otherwise get fully
+  // read and re-parsed on every frame. Mirrors the MAX_STDIN_BYTES cap in
+  // io.mjs's readJsonStdin.
+  try {
+    const stat = await fs.stat(filePath);
+    if (stat.size > MAX_CONFIG_BYTES) {
+      return {
+        config: structuredClone(DEFAULTS),
+        path: filePath,
+        exists: true,
+        warnings: [`invalid config in ${filePath}: file too large (>${MAX_CONFIG_BYTES} bytes); using defaults`],
+      };
+    }
+  } catch {
+    // Missing/unreadable file: fall through to the readFile attempt below,
+    // which already handles this the same way (exists:false, no warning).
+  }
 
   let raw;
   try {

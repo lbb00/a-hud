@@ -1,7 +1,7 @@
 {
   "name": "ahud",
   "description": "One HUD for Claude Code and Codex: context, tools, agents, and plan progress",
-  "version": "0.1.1",
+  "version": "0.2.1",
   "author": {
     "name": "ahud contributors"
   },
