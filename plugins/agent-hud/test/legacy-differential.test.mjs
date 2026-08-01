@@ -7,6 +7,10 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// legacy-statusline-command.sh was authored and empirically tuned against this
+// machine's macOS bash/jq/date/stat behavior only; it has no verified GNU
+// coreutils or Git-Bash-on-Windows parity, so these tests are macOS-only.
+const skipOffMacos = process.platform === "darwin" ? false : "legacy-statusline-command.sh has no verified non-macOS parity";
 const legacyHud = path.join(
   pluginRoot,
   "test",
@@ -52,7 +56,7 @@ async function prepareHome(root, name, transcript, now) {
   return { home, transcriptPath };
 }
 
-test("matches the authoritative shell HUD for the same full telemetry fixture", async (t) => {
+test("matches the authoritative shell HUD for the same full telemetry fixture", { skip: skipOffMacos }, async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agent-hud-parity-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const project = path.join(root, "project");
@@ -128,7 +132,7 @@ test("matches the authoritative shell HUD for the same full telemetry fixture", 
   );
 });
 
-test("matches partial reset-only telemetry, numeric strings, and generic model suffixes", async (t) => {
+test("matches partial reset-only telemetry, numeric strings, and generic model suffixes", { skip: skipOffMacos }, async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agent-hud-partial-parity-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const project = path.join(root, "project");
@@ -169,7 +173,7 @@ test("matches partial reset-only telemetry, numeric strings, and generic model s
   assert.deepEqual(visualStyles(current.stdout), visualStyles(legacy.stdout));
 });
 
-test("matches the shell HUD Git branch spacer, dirty marker, and churn styling", async (t) => {
+test("matches the shell HUD Git branch spacer, dirty marker, and churn styling", { skip: skipOffMacos }, async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agent-hud-git-parity-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const project = path.join(root, "project");
