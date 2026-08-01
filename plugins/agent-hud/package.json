@@ -42,7 +42,7 @@
     "@types/node": "^24.10.1",
     "esbuild": "^0.25.0",
     "get-east-asian-width": "^1.6.0",
-    "typescript": "^5.9.3"
+    "typescript": "^7.0.2"
   },
   "engines": {
     "node": ">=18"
