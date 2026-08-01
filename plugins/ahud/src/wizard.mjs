@@ -243,7 +243,11 @@ async function confirmAndProceed(reader, output, timeoutMs, target, home) {
     "Proceed? [Y/n]: ",
   ].join("\n");
   const answer = (await ask(reader, output, prompt, timeoutMs)).trim().toLowerCase();
-  return answer !== "n";
+  // "[Y/n]" only special-cases the single letter "n" for declining, but a
+  // user typing the equally natural full word "no" would otherwise fall
+  // through to the "anything else proceeds" default and write config files
+  // right after explicitly saying no.
+  return answer !== "n" && answer !== "no";
 }
 
 // ---------------------------------------------------------------------------

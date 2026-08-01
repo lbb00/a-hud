@@ -338,6 +338,16 @@ test("runSetupWizard Q3: \"N\" (uppercase) cancels — returns null", { timeout:
   assert.equal(result, null);
 });
 
+test("runSetupWizard Q3: the full word \"no\" also cancels, not just the single letter \"n\" (regression)", { timeout: 5_000 }, async () => {
+  const result = await runWizard(["2", "no"]);
+  assert.equal(result, null);
+});
+
+test("runSetupWizard Q3: \"No\" (mixed case) also cancels (regression)", { timeout: 5_000 }, async () => {
+  const result = await runWizard(["2", "No"]);
+  assert.equal(result, null);
+});
+
 // --- overall return shape ----------------------------------------------------
 
 test("runSetupWizard: successful run returns the exact documented shape (dryRun:false, config:undefined, home passed through)", { timeout: 5_000 }, async () => {
