@@ -6,6 +6,14 @@
   "bin": {
     "ahud": "src/cli.mjs"
   },
+  "files": [
+    "src",
+    "hooks",
+    "commands",
+    "skills",
+    ".codex-plugin",
+    ".claude-plugin"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/lbb00/a-hud.git",
@@ -29,6 +37,7 @@
     "@semantic-release/github": "^12.0.9",
     "@semantic-release/npm": "^13.1.5",
     "@semantic-release/release-notes-generator": "^14.1.1",
-    "semantic-release": "^25.0.8"
+    "semantic-release": "^25.0.8",
+    "smol-toml": "^1.7.1"
   }
 }
