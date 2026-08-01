@@ -1,0 +1,19 @@
+{
+  "name": "agent-hud",
+  "displayName": "Agent HUD",
+  "description": "One HUD for Cursor, Claude Code, Codex and Antigravity",
+  "version": "0.3.0",
+  "author": {
+    "name": "Agent HUD contributors"
+  },
+  "license": "MIT",
+  "keywords": [
+    "hud",
+    "statusline",
+    "cursor",
+    "claude-code",
+    "codex",
+    "antigravity",
+    "agents"
+  ]
+}

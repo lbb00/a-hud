@@ -1,14 +1,14 @@
 {
-  "name": "ahud",
+  "name": "agent-hud",
   "interface": {
-    "displayName": "ahud"
+    "displayName": "Agent HUD"
   },
   "plugins": [
     {
-      "name": "ahud",
+      "name": "agent-hud",
       "source": {
         "source": "local",
-        "path": "./plugins/ahud"
+        "path": "./plugins/agent-hud"
       },
       "policy": {
         "installation": "AVAILABLE",

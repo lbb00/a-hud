@@ -1,0 +1,57 @@
+name: Feature request
+description: Propose a focused improvement to Agent HUD
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - Shared UI contract
+        - Provider data or lifecycle
+        - Claude Code integration
+        - Codex integration
+        - Cursor CLI integration
+        - Antigravity CLI integration
+        - Packaging, docs or developer experience
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem is not solved today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe observable behavior, not only implementation
+    validations:
+      required: true
+
+  - type: textarea
+    id: host-evidence
+    attributes:
+      label: Host API evidence
+      description: Link documented status payloads or hooks; do not rely on transcript scraping
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+
+  - type: checkboxes
+    id: contract
+    attributes:
+      label: Contract checks
+      options:
+        - label: Unavailable host facts will be omitted rather than guessed.
+          required: true
+        - label: I considered the inherited shell HUD design rationale.
+          required: true

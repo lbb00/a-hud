@@ -1,0 +1,54 @@
+{
+  "name": "agent-hud",
+  "version": "0.3.0",
+  "description": "One terminal HUD for Codex, Claude Code, Cursor and Antigravity",
+  "keywords": [
+    "agent",
+    "antigravity",
+    "claude-code",
+    "codex",
+    "cursor-cli",
+    "hud",
+    "statusline",
+    "terminal"
+  ],
+  "type": "module",
+  "files": [
+    ".claude-plugin",
+    ".codex-plugin",
+    ".cursor-plugin",
+    "commands",
+    "dist",
+    "docs",
+    "hooks",
+    "LICENSE",
+    "plugin.json",
+    "README.md",
+    "README.zh-CN.md",
+    "skills"
+  ],
+  "bin": {
+    "agent-hud": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "npm run build --workspace @agent-hud/provider && tsc -p tsconfig.json && esbuild src/cli.ts src/adapter.ts src/design.ts src/render.ts src/setup.ts src/terminal-width.ts --bundle --platform=node --format=esm --target=node18 --outdir=dist --sourcemap",
+    "pretest": "npm run build",
+    "test": "node --test",
+    "demo": "node dist/cli.js demo",
+    "check": "npm run build && node --test"
+  },
+  "devDependencies": {
+    "@agent-hud/provider": "0.1.0",
+    "@types/node": "^24.10.1",
+    "esbuild": "^0.25.0",
+    "get-east-asian-width": "^1.6.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "name": "@agent-hud/provider",
+  "version": "0.1.0",
+  "description": "Host-neutral data provider for Agent HUD",
+  "keywords": [
+    "agent",
+    "claude-code",
+    "codex",
+    "cursor-cli",
+    "hud",
+    "telemetry"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md",
+    "README.zh-CN.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "pretest": "npm run build",
+    "test": "node --test",
+    "check": "npm run build && node --test"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
+}
