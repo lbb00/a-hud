@@ -36,6 +36,7 @@ test("patches Claude settings without removing existing hooks", () => {
     JSON.stringify({ hooks: { Stop: [] }, model: "sonnet" }),
     "/usr/bin/node",
     "/plugin/dist/cli.js",
+    "linux",
   ));
   assert.equal(result.model, "sonnet");
   assert.deepEqual(result.hooks, { Stop: [] });
@@ -49,6 +50,7 @@ test("shell-quotes Claude statusline paths without expanding repository text", (
     "{}",
     "/tmp/node$HOME",
     "/plugin/it's `not executed`/cli.js",
+    "linux",
   ));
   assert.equal(
     result.statusLine.command,
@@ -141,6 +143,7 @@ test("patches Cursor's native statusLine schema without losing CLI settings", ()
     }),
     "/usr/bin/node",
     "/plugin/dist/cli.js",
+    "linux",
   ));
   assert.equal(result.model.modelId, "grok-4.5");
   assert.deepEqual(result.permissions.allow, ["Shell(git)"]);
@@ -161,8 +164,8 @@ test("merges idempotent Cursor hooks while preserving existing integrations", ()
       preToolUse: [{ command: "./rtk.sh", matcher: "Shell" }],
     },
   });
-  const once = patchCursorHooks(original, "/usr/bin/node", "/plugin/dist/cli.js");
-  const twice = patchCursorHooks(once, "/usr/bin/node", "/plugin/dist/cli.js");
+  const once = patchCursorHooks(original, "/usr/bin/node", "/plugin/dist/cli.js", "linux");
+  const twice = patchCursorHooks(once, "/usr/bin/node", "/plugin/dist/cli.js", "linux");
   const parsed = JSON.parse(twice);
   assert.ok(parsed.hooks.stop.some((hook) => hook.command.includes("codeisland")));
   assert.ok(parsed.hooks.preToolUse.some((hook) => hook.command === "./rtk.sh"));
@@ -192,6 +195,7 @@ test("patches Antigravity statusline and owns only its namespaced hooks", () => 
     JSON.stringify({ model: "Gemini", enableTelemetry: false }),
     "/usr/bin/node",
     "/plugin/dist/cli.js",
+    "linux",
   ));
   assert.equal(settings.model, "Gemini");
   assert.equal(settings.enableTelemetry, false);
@@ -204,6 +208,7 @@ test("patches Antigravity statusline and owns only its namespaced hooks", () => 
     JSON.stringify({ codeisland: { Stop: [] } }),
     "/usr/bin/node",
     "/plugin/dist/cli.js",
+    "linux",
   ));
   assert.deepEqual(hooks.codeisland, { Stop: [] });
   assert.equal(hooks["agent-hud"].PreToolUse[0].matcher, "*");
@@ -216,6 +221,7 @@ test("patches Antigravity statusline and owns only its namespaced hooks", () => 
       JSON.stringify(hooks),
       "/usr/bin/node",
       "/plugin/dist/cli.js",
+      "linux",
     )),
     hooks,
   );
