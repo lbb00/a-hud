@@ -15,8 +15,10 @@ function run(executable, args, options = {}) {
   const result = spawnSync(executable, args, {
     cwd: options.cwd ?? workspaceRoot,
     encoding: "utf8",
-    // npm.cmd is a Windows batch file; spawnSync can't exec it directly there.
-    shell: process.platform === "win32",
+    // npm.cmd is a Windows batch file that spawnSync can't exec directly
+    // there; routing node.exe itself through a shell would instead mangle
+    // multi-line --eval arguments, so this only applies to .cmd executables.
+    shell: process.platform === "win32" && executable.toLowerCase().endsWith(".cmd"),
     env: {
       ...process.env,
       NO_COLOR: "1",
