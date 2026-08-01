@@ -15,6 +15,8 @@ function run(executable, args, options = {}) {
   const result = spawnSync(executable, args, {
     cwd: options.cwd ?? workspaceRoot,
     encoding: "utf8",
+    // npm.cmd is a Windows batch file; spawnSync can't exec it directly there.
+    shell: process.platform === "win32",
     env: {
       ...process.env,
       NO_COLOR: "1",
@@ -27,6 +29,7 @@ function run(executable, args, options = {}) {
     0,
     [
       `${executable} ${args.join(" ")} failed`,
+      result.error?.message,
       result.stdout,
       result.stderr,
     ].filter(Boolean).join("\n"),
