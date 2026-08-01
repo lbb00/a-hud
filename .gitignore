@@ -1,4 +1,17 @@
-node_modules/
 .DS_Store
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
 *.log
-.ahud/
+*.tgz
+coverage/
+node_modules/
+**/node_modules/
+packages/provider/dist/
+
+# The plugin bundle is intentionally committed: host plugin managers install
+# directly from the marketplace checkout and do not run a TypeScript build.
+!plugins/agent-hud/dist/
+!plugins/agent-hud/dist/**

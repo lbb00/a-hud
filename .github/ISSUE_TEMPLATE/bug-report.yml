@@ -1,0 +1,73 @@
+name: Bug report
+description: Report a reproducible Agent HUD problem
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not report vulnerabilities here. Use the private process in
+        SECURITY.md. Redact prompts, transcripts, credentials and personal
+        paths from all diagnostics.
+
+  - type: dropdown
+    id: host
+    attributes:
+      label: Host
+      options:
+        - Claude Code
+        - Codex
+        - Cursor CLI
+        - Antigravity CLI
+        - Shared provider or packaging
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Agent HUD, host CLI, Node.js and operating system versions
+      placeholder: Agent HUD 0.3.0; Codex 0.x; Node 22.x; macOS 15
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Minimal, deterministic steps using synthetic data when possible
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics
+      description: Include terminal width and NO_COLOR behavior when relevant
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety checks
+      options:
+        - label: I removed credentials, prompts, transcripts and personal paths.
+          required: true
+        - label: I searched existing issues for the same problem.
+          required: true

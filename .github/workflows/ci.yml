@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: ${{ matrix.os }} / Node ${{ matrix.node }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            node: 20
+          - os: ubuntu-latest
+            node: 22
+          - os: ubuntu-latest
+            node: 24
+          - os: macos-latest
+            node: 22
+          - os: windows-latest
+            node: 22
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Use the reviewed npm toolchain
+        run: npm install --global npm@11.16.0
+
+      - name: Install exact dependencies
+        run: npm ci
+
+      - name: Run quality gate
+        run: npm run check
+
+      - name: Lint packed package contracts
+        run: npm run package:lint
+
+      - name: Exercise packed public artifacts
+        run: npm run package:smoke
+
+      - name: Verify committed plugin bundle
+        if: runner.os == 'Linux' && matrix.node == 24
+        run: git diff --exit-code -- plugins/agent-hud/dist
+
+      - name: Audit runtime dependencies
+        if: runner.os == 'Linux' && matrix.node == 24
+        run: npm audit --omit=dev
+
+  runtime-node18:
+    name: Published runtime / Node 18
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build with the development toolchain
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm install --global npm@11.16.0
+      - run: npm ci
+      - run: npm run build
+
+      - name: Switch to the minimum published runtime
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 18
+          package-manager-cache: false
+
+      - name: Run the bundled CLI
+        run: node plugins/agent-hud/dist/cli.js demo
+
+      - name: Import the compiled provider
+        run: >-
+          node --input-type=module -e
+          "import { contextPercent } from './packages/provider/dist/index.js';
+          if (contextPercent({context_window:{used_percentage:42}}) !== 42)
+          process.exit(1)"

@@ -1,0 +1,21 @@
+{
+  "name": "agent-hud",
+  "version": "0.3.0",
+  "description": "One HUD for Codex, Claude Code, Cursor and Antigravity",
+  "author": {
+    "name": "Agent HUD contributors"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Agent HUD",
+    "shortDescription": "A shared HUD for four agent CLIs.",
+    "longDescription": "Agent HUD uses one event model and inherited shell-HUD design across Codex, Claude Code, Cursor and Antigravity. It configures each host's supported native surface and adds an optional live activity companion.",
+    "developerName": "Agent HUD contributors",
+    "category": "Productivity",
+    "capabilities": [
+      "hooks",
+      "skills"
+    ],
+    "defaultPrompt": "Set up Agent HUD for this Codex installation."
+  }
+}
