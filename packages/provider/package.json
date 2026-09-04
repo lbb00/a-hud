@@ -21,6 +21,7 @@
   "files": [
     "dist",
     "LICENSE",
+    "promotions.json",
     "README.md",
     "README.zh-CN.md"
   ],

@@ -22,6 +22,7 @@ agent-hud setup claude
 agent-hud setup codex [--preset compact|balanced|full]
 agent-hud setup cursor
 agent-hud setup antigravity
+agent-hud setup pi
 agent-hud setup both
 agent-hud setup all
 ```
@@ -40,7 +41,12 @@ Common setup options:
 | `--preset NAME` | Select the Codex native footer preset |
 
 `both` configures Claude Code and Codex. `all` additionally configures Cursor
-CLI and Antigravity CLI.
+CLI, Antigravity CLI and pi.
+
+`setup pi` writes `~/.pi/agent/extensions/agent-hud.ts`, which re-exports the
+built extension. pi loads every `.ts` file in that directory with no build step,
+so the installed file stays a single line and upgrading the plugin is enough.
+`PI_CODING_AGENT_DIR` overrides the directory it is written into.
 
 ## Status line
 
@@ -99,12 +105,42 @@ agent-hud demo
 It is the quickest way to confirm that the installed executable and terminal
 styling work.
 
+## Promotional windows
+
+```text
+agent-hud promotions [--platform claude|codex|cursor|antigravity|pi] [--endpoint URL]
+```
+
+Prints the config path, the shared-schedule cache path, your local zone, where
+the shared schedule came from and when, every parsed window tagged `local` or
+`shared`, the filters used for this run, and which window is open or coming up
+next. Use it when the HUD shows no badge and you need to tell "nothing is
+scheduled" from "the file is not being read" or "no endpoint was provided".
+
+Windows come from the schedule maintained in the repository — fetched into
+`~/.agent-hud/promotions-cache.json`, falling back to the copy bundled with the
+package — plus your own `~/.agent-hud/config.json` layered on top. Configured
+hours are UTC unless a window sets `timezone`; reported times are always
+converted to the local zone. The README documents the fields.
+
+`--endpoint` answers the question for one API rather than for the host in
+general: pass the base URL a model is billed on, e.g.
+`--endpoint https://api.deepseek.com`, and windows bound to that endpoint are
+included. Without it, such windows stay out of the answer. The command reports
+that no endpoint was provided instead of silently making that filter look like
+an empty schedule.
+
 ## Environment
 
 | Variable | Meaning |
 | --- | --- |
 | `AGENT_HUD_DATA_DIR` | Override local event storage (default `~/.agent-hud`) |
+| `AGENT_HUD_CONFIG` | Override the promotional-window config file path |
+| `AGENT_HUD_PROMOTIONS_URL` | Override the shared promotional schedule URL |
+| `AGENT_HUD_NO_REMOTE` | Set to `1` to never fetch the shared schedule |
 | `NO_COLOR` | Disable ANSI styling |
 
-The internal `refresh-health` command is reserved for the background
-Anthropic Statuspage refresh process and is not a public interactive command.
+The internal `refresh-health` and `refresh-promotions` commands are reserved for
+the background Anthropic Statuspage and shared-schedule refresh processes. They
+are not public interactive commands: a status line starts them detached when its
+cache is due, so a repaint never waits on the network.

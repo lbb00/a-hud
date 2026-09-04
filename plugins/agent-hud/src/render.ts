@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import { HUD_DESIGN, type Severity } from "./design.js";
+import { healthSeverity, HUD_DESIGN, type Severity } from "./design.js";
 import {
   terminalWidth,
   truncateLeft,
@@ -16,12 +16,14 @@ import type {
 const RESET = "\u001b[0m";
 
 /**
- * The palette is intentionally tiny. Hue is reserved for warning severity;
+ * The palette is intentionally tiny. Hue is reserved for warning severity plus
+ * the single opportunity signal (green, an open promotional window);
  * brightness, not decorative color, separates session state from location.
  */
 const PALETTE = {
   dim: "\u001b[2m",
   bright: "\u001b[97m",
+  green: "\u001b[32m",
   yellow: "\u001b[33m",
   red: "\u001b[31m",
 };
@@ -176,6 +178,60 @@ function formatReset(value: number | string | null | undefined, includeWeekday =
   return `${weekday}${hhmm}`;
 }
 
+/**
+ * Promotional windows compete for the same first line as quota and resets, so
+ * the remaining time is compressed to its two most significant units.
+ */
+function compactDuration(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  const days = Math.floor(total / 86_400);
+  const hours = Math.floor((total % 86_400) / 3_600);
+  const minutes = Math.floor((total % 3_600) / 60);
+  if (days) return hours ? `${days}d${hours}h` : `${days}d`;
+  if (hours) return `${hours}h${String(minutes).padStart(2, "0")}`;
+  return `${minutes}m`;
+}
+
+/**
+ * An open window turns green: it is the HUD's only reward signal, as opposed to
+ * the yellow and red warnings. A window that has not opened yet is marked `↑`
+ * and stays plain, because there is nothing to act on yet.
+ */
+function promotionToken(snapshot: HudSnapshot, colors: boolean): string {
+  const promotion = snapshot.promotion;
+  const now = isFiniteNumber(snapshot.observedAt) && snapshot.observedAt > 0
+    ? snapshot.observedAt
+    : Date.now() / 1_000;
+  const text = promotionText(promotion, now);
+  if (!text) return "";
+  return promotion?.active ? paint("green", text, colors) : text;
+}
+
+/**
+ * The uncolored promotion token. Hosts that cannot take the three-line HUD
+ * still show this one, in their own palette, so the wording stays in one place.
+ */
+export function promotionText(
+  promotion: HudSnapshot["promotion"],
+  now: number,
+): string {
+  if (!promotion || !isFiniteNumber(promotion.changesAt)) return "";
+  const label = displayText(promotion.label).slice(0, 8);
+  const time = compactDuration(promotion.changesAt - now);
+  return `%${label}${label ? " " : ""}${promotion.active ? "" : "↑"}${time}`;
+}
+
+/**
+ * The uncolored incident token. The three-line HUD says this by coloring the
+ * model name, which a host that prints no model name of its own cannot do, so
+ * those hosts name the vendor instead. Empty unless its status page reports an
+ * incident.
+ */
+export function incidentText(indicator: string, label: string): string {
+  if (healthSeverity(indicator) === "plain") return "";
+  return `!${displayText(label).slice(0, 12)}`;
+}
+
 function compactTokens(value: unknown): string {
   if (!isFiniteNumber(value)) return "";
   return value >= 1000 ? `${Math.floor(value / 1000)}k` : `${Math.floor(value)}`;
@@ -295,6 +351,8 @@ export function renderSnapshot(
   if (resets.length) {
     line1.push(`↻${resets.join("/")}`);
   }
+  const promotion = promotionToken(snapshot, colors);
+  if (promotion) line1.push(promotion);
 
   const lines: string[] = [];
   if (line1.length) lines.push(line1.join(separator));

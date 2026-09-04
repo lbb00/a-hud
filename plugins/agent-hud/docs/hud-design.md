@@ -27,6 +27,7 @@ statusline, so the original hierarchy remains intact.
 | `*19:04`, `*cold` | Prefix-cache expiry time or expired cache |
 | `#15%/70%` | 5-hour and 7-day quota usage |
 | `↻13:10/Fri19:00` | Reset times in the same order as quota |
+| `%+50% 9d` | Promotional window: green while open, `↑3h` until it opens |
 | `$5.32` | Client-estimated session cost |
 | `→~3t`, `→full` | Turns until forced compact, or already in the zone |
 | `↓~12t` | Turns until a voluntary compact pays for itself |
@@ -95,7 +96,9 @@ that information. On panes narrower than 60 columns, line two is hidden.
 The cwd is home-relative and left-ellipsized, preserving the useful path tail.
 Width follows live terminal columns and Unicode East Asian Width rules,
 including locale-dependent ambiguous characters. Only basic dim,
-bright-white, yellow, and red ANSI SGR codes are used.
+bright-white, green, yellow, and red ANSI SGR codes are used. Yellow and red
+are warnings; green appears on exactly one item, an open promotional window,
+because it is the only signal that rewards acting right away.
 
 ## Codex adapter
 

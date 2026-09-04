@@ -4,16 +4,22 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import {
+  claudeApiEndpoint,
+  currentPromotion,
   deriveClaudeTelemetry,
   getGitStatus,
+  healthSourceById,
+  healthSourceFor,
   loadState,
   normalizeAntigravityStatus,
   normalizeClaudeStatus,
   normalizeCursorStatus,
   readJsonStdin,
   recordHook,
-  refreshAnthropicHealth,
+  refreshHealth,
+  refreshSharedPromotions,
   spawnHealthRefresh,
+  spawnPromotionsRefresh,
   type AntigravityStatusInput,
   type ClaudeStatusInput,
   type CursorStatusInput,
@@ -28,12 +34,14 @@ import {
   snapshotFromState,
 } from "./adapter.js";
 import { HUD_DESIGN } from "./design.js";
+import { promotions } from "./promotions-cli.js";
 import { renderSnapshot } from "./render.js";
 import {
   setupAntigravity,
   setupClaude,
   setupCodex,
   setupCursor,
+  setupPi,
 } from "./setup.js";
 import type { HudSnapshot } from "./types.js";
 
@@ -47,7 +55,7 @@ function valueAfter(args: string[], flag: string): string | null {
 
 function hookPlatform(args: string[]): Platform | undefined {
   const value = valueAfter(args, "--platform");
-  return ["codex", "claude", "antigravity", "cursor", "agent"].includes(
+  return ["codex", "claude", "antigravity", "cursor", "pi", "agent"].includes(
     String(value),
   ) ? value as Platform : undefined;
 }
@@ -78,6 +86,9 @@ async function statusline(): Promise<void> {
     ClaudeStatusInput | CursorStatusInput | AntigravityStatusInput
   ) | null;
   if (!input) return;
+  // The shared promotional schedule is fetched by a detached child, never here:
+  // a status line must not wait on the network.
+  await spawnPromotionsRefresh(CLI_PATH);
   const isAntigravity =
     (input as AntigravityStatusInput).product === "antigravity" ||
     typeof (input as AntigravityStatusInput).agent_state === "string";
@@ -98,6 +109,7 @@ async function statusline(): Promise<void> {
     const snapshot = snapshotFromAntigravity(
       normalizeAntigravityStatus(host, state),
       host.vcs ? null : getGitStatus(cwd),
+      currentPromotion({ platform: "antigravity" }),
     );
     process.stdout.write(`${renderSnapshot(snapshot, {
       activity: false,
@@ -110,6 +122,7 @@ async function statusline(): Promise<void> {
     const snapshot = snapshotFromCursor(
       normalizeCursorStatus(host, state),
       getGitStatus(cwd),
+      currentPromotion({ platform: "cursor" }),
     );
     process.stdout.write(`${renderSnapshot(snapshot, {
       activity: false,
@@ -117,14 +130,23 @@ async function statusline(): Promise<void> {
     })}\n`);
     return;
   }
+  const endpoint = claudeApiEndpoint();
+  const healthSource = healthSourceFor(endpoint);
   const derived = await deriveClaudeTelemetry(input, {
     compactTargetPercent: HUD_DESIGN.warning.contextFullness.red,
     compactSummaryTokens: HUD_DESIGN.compact.summaryTokens,
     recentContextRows: HUD_DESIGN.compact.recentChangedRows,
+    healthSource,
   });
   const facts = normalizeClaudeStatus(input, state, derived);
-  if (facts.healthCacheStale) await spawnHealthRefresh(CLI_PATH);
-  const snapshot = snapshotFromClaude(facts, getGitStatus(cwd));
+  if (healthSource && facts.healthCacheStale) {
+    await spawnHealthRefresh(CLI_PATH, healthSource);
+  }
+  const snapshot = snapshotFromClaude(
+    facts,
+    getGitStatus(cwd),
+    currentPromotion({ platform: "claude", endpoint }),
+  );
   process.stdout.write(`${renderSnapshot(snapshot, { activity: false })}\n`);
 }
 
@@ -203,7 +225,11 @@ async function currentSnapshot(
 ): Promise<HudSnapshot> {
   const cwd = valueAfter(args, "--cwd") || process.cwd();
   const state = await loadState({ cwd });
-  return snapshotFromState(state, git(state.cwd || cwd));
+  return snapshotFromState(
+    state,
+    git(state.cwd || cwd),
+    currentPromotion({ platform: state.platform }),
+  );
 }
 
 async function renderCurrent(
@@ -301,9 +327,12 @@ async function setup(args: string[]): Promise<void> {
   if (target === "antigravity" || target === "all") {
     results.push(["Antigravity", await setupAntigravity(options)]);
   }
+  if (target === "pi" || target === "all") {
+    results.push(["pi", await setupPi(options)]);
+  }
   if (!results.length) {
     throw new Error(
-      "setup target must be claude, codex, cursor, antigravity, both, or all",
+      "setup target must be claude, codex, cursor, antigravity, pi, both, or all",
     );
   }
   for (const [label, result] of results) {
@@ -332,10 +361,15 @@ async function setup(args: string[]): Promise<void> {
   }
 }
 
-async function refreshHealth(args: string[]): Promise<void> {
+async function refreshHealthCommand(args: string[]): Promise<void> {
+  // Only an identifier crosses the process boundary; the address to fetch is
+  // resolved from the registry compiled into this build.
+  const source = healthSourceById(valueAfter(args, "--source") || "");
+  if (!source) return;
   const lockPath = valueAfter(args, "--refresh-lock");
   const lockToken = valueAfter(args, "--refresh-token");
-  await refreshAnthropicHealth(
+  await refreshHealth(
+    source,
     valueAfter(args, "--home") || undefined,
     lockPath && lockToken ? { path: lockPath, token: lockToken } : undefined,
   );
@@ -354,13 +388,20 @@ Usage:
   agent-hud setup codex [--preset compact|balanced|full]
   agent-hud setup cursor             configure Cursor statusLine and hooks
   agent-hud setup antigravity        configure Antigravity statusLine and hooks
+  agent-hud setup pi                 install the pi footer extension
   agent-hud setup both
   agent-hud setup all
   agent-hud demo
+  agent-hud promotions [--platform claude|codex|cursor|antigravity|pi]
+                       [--endpoint URL]
+                                     inspect configured promotional windows
 
 Environment:
-  AGENT_HUD_DATA_DIR   override local event storage
-  NO_COLOR             disable ANSI colors
+  AGENT_HUD_DATA_DIR      override local event storage
+  AGENT_HUD_CONFIG        override the promotions config file path
+  AGENT_HUD_PROMOTIONS_URL  override the shared promotions schedule URL
+  AGENT_HUD_NO_REMOTE     never fetch the shared schedule
+  NO_COLOR                disable ANSI colors
 `);
 }
 
@@ -371,7 +412,14 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   if (command === "watch") return watch(args);
   if (command === "setup") return setup(args);
   if (command === "demo") return demo();
-  if (command === "refresh-health") return refreshHealth(args);
+  if (command === "promotions") {
+    return promotions(hookPlatform(args), valueAfter(args, "--endpoint") ?? undefined);
+  }
+  if (command === "refresh-health") return refreshHealthCommand(args);
+  if (command === "refresh-promotions") {
+    await refreshSharedPromotions();
+    return;
+  }
   help();
 }
 

@@ -31,7 +31,7 @@
     "agent-hud": "./dist/cli.js"
   },
   "scripts": {
-    "build": "npm run build --workspace @agent-hud/provider && tsc -p tsconfig.json && esbuild src/cli.ts src/adapter.ts src/design.ts src/render.ts src/setup.ts src/terminal-width.ts --bundle --platform=node --format=esm --target=node18 --outdir=dist --sourcemap",
+    "build": "npm run build --workspace @agent-hud/provider && tsc -p tsconfig.json && esbuild src/cli.ts src/adapter.ts src/design.ts src/pi-extension.ts src/promotions-cli.ts src/render.ts src/setup.ts src/terminal-width.ts --bundle --platform=node --format=esm --target=node18 --outdir=dist --sourcemap",
     "pretest": "npm run build",
     "test": "node --test",
     "demo": "node dist/cli.js demo",

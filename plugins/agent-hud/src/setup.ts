@@ -388,6 +388,29 @@ export async function setupClaude(options: SetupOptions = {}) {
   return { filePath, ...(await writeWithBackup(filePath, content, options.dryRun)) };
 }
 
+/**
+ * pi loads every `.ts` file in its extensions directory through jiti, with no
+ * build step, so the installed file only re-exports the bundled extension. The
+ * plugin can then be rebuilt or upgraded without touching pi's config.
+ */
+export function piExtensionModule(cliPath = CLI_PATH): string {
+  const target = path.join(path.dirname(cliPath), "pi-extension.js");
+  return `// Written by \`agent-hud setup pi\`. Edit the plugin, not this file.\n` +
+    `export { default } from ${JSON.stringify(target)};\n`;
+}
+
+export async function setupPi(options: SetupOptions = {}) {
+  const root = process.env.PI_CODING_AGENT_DIR ||
+    path.join(os.homedir(), ".pi", "agent");
+  const filePath = options.config ||
+    path.join(root, "extensions", "agent-hud.ts");
+  const content = piExtensionModule(options.cliPath);
+  return {
+    filePath,
+    ...(await writeWithBackup(filePath, content, options.dryRun)),
+  };
+}
+
 async function readOptional(filePath: string): Promise<string> {
   try {
     return await fs.readFile(filePath, "utf8");

@@ -4,7 +4,13 @@
  * They intentionally know nothing about lines, glyphs, ANSI colors, warning
  * ramps, or responsive layout. Those are UI-plugin concerns.
  */
-export type Platform = "codex" | "claude" | "antigravity" | "cursor" | "agent";
+export type Platform =
+  | "codex"
+  | "claude"
+  | "antigravity"
+  | "cursor"
+  | "pi"
+  | "agent";
 export type ActivityStatus = "running" | "completed" | "error";
 export type PlanStatus = "pending" | "in_progress" | "completed";
 export type SessionStatus = "idle" | "working" | "waiting";

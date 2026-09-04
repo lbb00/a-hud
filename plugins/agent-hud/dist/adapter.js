@@ -54,13 +54,13 @@ var HUD_DESIGN = {
     cwdMinimumColumns: 14
   }
 };
-
-// src/adapter.ts
 function healthSeverity(indicator) {
   if (indicator === "major" || indicator === "critical") return "red";
   if (indicator === "minor") return "yellow";
   return "plain";
 }
+
+// src/adapter.ts
 function cacheView(facts) {
   if (!facts.cache) return null;
   const remaining = facts.cache.expiresAt - facts.observedAt;
@@ -87,7 +87,7 @@ function compactAdvisor(facts) {
   }
   return null;
 }
-function snapshotFromClaude(facts, git = null) {
+function snapshotFromClaude(facts, git = null, promotion = null) {
   const cwd = facts.cwd;
   return {
     platform: "claude",
@@ -112,10 +112,11 @@ function snapshotFromClaude(facts, git = null) {
     plan: facts.plan,
     modelSeverity: healthSeverity(facts.apiHealthIndicator),
     cache: cacheView(facts),
-    compactAdvisor: compactAdvisor(facts)
+    compactAdvisor: compactAdvisor(facts),
+    promotion
   };
 }
-function snapshotFromState(state, git = null) {
+function snapshotFromState(state, git = null, promotion = null) {
   const cwd = state.cwd;
   return {
     platform: state.platform,
@@ -140,10 +141,11 @@ function snapshotFromState(state, git = null) {
     plan: state.plan,
     modelSeverity: "plain",
     cache: null,
-    compactAdvisor: null
+    compactAdvisor: null,
+    promotion
   };
 }
-function snapshotFromCursor(facts, git = null) {
+function snapshotFromCursor(facts, git = null, promotion = null) {
   const cwd = facts.cwd;
   return {
     platform: "cursor",
@@ -168,10 +170,11 @@ function snapshotFromCursor(facts, git = null) {
     plan: facts.plan,
     modelSeverity: "plain",
     cache: null,
-    compactAdvisor: null
+    compactAdvisor: null,
+    promotion
   };
 }
-function snapshotFromAntigravity(facts, fallbackGit = null) {
+function snapshotFromAntigravity(facts, fallbackGit = null, promotion = null) {
   const cwd = facts.cwd;
   return {
     platform: "antigravity",
@@ -196,7 +199,8 @@ function snapshotFromAntigravity(facts, fallbackGit = null) {
     plan: facts.plan,
     modelSeverity: "plain",
     cache: null,
-    compactAdvisor: null
+    compactAdvisor: null,
+    promotion
   };
 }
 export {
