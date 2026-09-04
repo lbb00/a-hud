@@ -85,7 +85,14 @@ hidden because they are noise, not actionable telemetry.
 - Cache TTL is inferred from recent cache writes: an `ephemeral_1h` prefix uses
   one hour; a shorter cache-write session uses five minutes; missing evidence
   falls back to one hour.
-- Cache displays an absolute expiry clock, not a frozen relative countdown.
+- Cache displays an absolute expiry clock, not a relative countdown. Hosts do
+  not repaint the line while a session sits idle, so a `9m` countdown freezes
+  at the moment you walk away — exactly when the number matters. `*19:04`
+  survives being frozen: read it against the wall clock and it is still true.
+  Minute resolution follows from that reading, so two sessions whose
+  transcripts were last written in the same minute legitimately show one
+  clock. The field answers when this session's prefix cache dies, not which
+  session you are looking at.
 - Quota color is the worse of absolute usage and projected burn rate. Pace is
   ignored during the noisy first 10% of a window.
 
