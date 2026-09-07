@@ -30,7 +30,7 @@
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
-    "publint": "^0.3.22",
-    "oxlint": "^1.76.0"
+    "publint": "^0.3.24",
+    "oxlint": "^1.81.0"
   }
 }
