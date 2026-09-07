@@ -3,7 +3,7 @@
 All notable user-visible changes to Agent HUD are documented here. The project
 uses semantic versioning for each published workspace package.
 
-## Unreleased
+## Agent HUD 0.4.0 - 2026-09-07
 
 ### Added
 

@@ -1,6 +1,6 @@
 {
   "name": "agent-hud",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "One terminal HUD for Codex, Claude Code, Cursor and Antigravity",
   "keywords": [
     "agent",
@@ -38,7 +38,7 @@
     "check": "npm run build && node --test"
   },
   "devDependencies": {
-    "@agent-hud/provider": "0.1.0",
+    "@agent-hud/provider": "0.2.0",
     "@types/node": "^24.10.1",
     "esbuild": "^0.25.0",
     "get-east-asian-width": "^1.6.0",
