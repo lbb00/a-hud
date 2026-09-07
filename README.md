@@ -2,9 +2,9 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-Agent HUD is an open-source terminal heads-up display (HUD) and status line for Claude Code, OpenAI Codex, Cursor CLI, Antigravity CLI, and pi. It puts the session facts your host makes available—such as context and token usage, quota or estimated cost, Git state, and activity—where you can see them while you work. pi keeps its own footer and receives only the promotion and vendor-health extension it needs.
+Agent HUD is an open-source terminal status line (a heads-up display, or HUD) for Claude Code, OpenAI Codex, Cursor CLI, Antigravity CLI, and pi. It shows what the host already knows about the session but does not put on screen: context and token usage, quota or estimated cost, Git state, and what the agent is doing right now. pi keeps its own footer and gets a single extra segment for promotions and vendor incidents.
 
-Use Agent HUD when you want one familiar view across AI coding agents without replacing their native workflows. It reads each host's supported signals, leaves unavailable data out, and keeps configuration scoped to the host you choose.
+The same HUD reads the same way on every host, so you do not relearn it when you switch tools. Each host installs through its own mechanism, and nothing unrelated in its settings is touched.
 
 ## Contents
 
@@ -14,7 +14,7 @@ Use Agent HUD when you want one familiar view across AI coding agents without re
 - [Promotional windows](#promotional-windows)
 - [FAQ](#faq)
 - [Development](#development)
-- [Project policies](#project-policies)
+- [More documentation](#more-documentation)
 
 ## Install
 
@@ -70,15 +70,13 @@ pi keeps its own footer for tokens, cost, context, and branch details. Agent HUD
 
 ## Host support
 
-| Host | HUD or extension | Available facts depend on the host |
+| Host | Where it appears | What it shows |
 | --- | --- | --- |
-| Claude Code | Native three-line status line | Session, quota, cache, cost estimate, compaction estimate, Git, promotions |
-| Codex | Native footer with an optional [activity companion](plugins/agent-hud/docs/cli.md#activity-companion) | Session and Git facts; unavailable 5-hour quota is omitted; the companion shows tools, subagents, and plans |
-| Cursor CLI | Native status line and hooks | Session and Git facts; unavailable quota is omitted |
-| Antigravity CLI | Native status line and hooks | Quota and Git facts when the host provides them |
-| pi | Extension in pi's own footer | Promotions and vendor incidents for the selected API endpoint |
-
-Agent HUD displays the data available from each host. If a field is not supplied, it is simply not shown.
+| Claude Code | Its native three-line status line | Session, quota, cache, cost estimate, compaction estimate, Git, promotions |
+| Codex | Its native footer, plus an optional [activity companion](plugins/agent-hud/docs/cli.md#activity-companion) | Session and Git; Codex does not report the 5-hour quota, so it is left out; the companion shows tools, subagents, and plans |
+| Cursor CLI | Its native status line and hooks | Session and Git; quota is left out because Cursor does not report it |
+| Antigravity CLI | Its native status line and hooks | Quota and Git, when the host provides them |
+| pi | One segment in pi's own footer | Promotions and vendor incidents for the selected API endpoint |
 
 ## HUD at a glance
 
@@ -90,7 +88,7 @@ $5.32 | →~3t
 agent-hud | main*↑2 | +128/-17 | /workspace/agent-hud
 ```
 
-The first line shows session state, the second helps with a cost or compaction decision, and the third shows where you are. A host can omit any field it cannot provide.
+Each line answers one question: what this session is doing, whether to act on it now, and where you are. A field the host cannot supply is left out rather than guessed.
 
 **Session state**
 
@@ -102,7 +100,7 @@ The first line shows session state, the second helps with a cost or compaction d
 | `*19:04` | Prefix-cache expiry; `*cold` means the cache has expired |
 | `#15%/70%` | Used share of the 5-hour and 7-day quotas, when available |
 | `↻13:10/Fri19:00` | Reset times for those quotas, in the same order |
-| `%+50% 9d` | A promotion: green while open with time remaining; `↑3h` means it opens in three hours; no time means it has no stated end |
+| `%+50% 9d` | Promotional window: green while open, with the time left; `%+50% ↑3h` means it opens in three hours; `%+50%` alone is open with no end date |
 
 **Decision support**
 
@@ -121,15 +119,15 @@ The first line shows session state, the second helps with a cost or compaction d
 | `+128/-17` | Lines added and removed in this session |
 | `/workspace/agent-hud` | Working directory; on narrow terminals the left side is shortened so the end remains visible |
 
-Color communicates warning level and brightness communicates hierarchy. Green is reserved for an open promotional window. Full field definitions and warning thresholds are in the [HUD design contract](plugins/agent-hud/docs/hud-design.md).
+Color means warning level and nothing else; brightness marks hierarchy. Green is the one exception, reserved for an open promotional window. Full field definitions and the warning thresholds are in the [HUD design contract](plugins/agent-hud/docs/hud-design.md).
 
 ## Promotional windows
 
-Vendors sometimes offer temporary off-peak usage or other bonuses that a host does not include in its status payload. Agent HUD can show those verified windows in the HUD. The shared list lives in [`packages/provider/promotions.json`](packages/provider/promotions.json) and is currently empty; unverified campaigns are deliberately left out.
+Vendors run temporary campaigns, such as off-peak discounts or weekend bonuses, that no host reports in its status payload. Agent HUD shows them as a badge. The shared schedule lives in this repository, in [`packages/provider/promotions.json`](packages/provider/promotions.json), so a campaign is corrected once for everyone instead of in every user's config. It ships empty on purpose: a window nobody verified is worse than no badge, so entries arrive by pull request.
 
-Agent HUD reads a cached shared schedule from `~/.agent-hud/promotions-cache.json`, falling back to the bundled copy when no usable cache exists. Your `~/.agent-hud/config.json` overrides matching shared entries. A newer bundled schedule can supersede an older cached one. The shared list is a static JSON file fetched from this repository at most once every six hours; if a refresh fails, a previously downloaded valid copy remains available. `AGENT_HUD_NO_REMOTE=1` stops requests for that shared promotion list; it does not make every Agent HUD feature offline.
+The schedule reaches your machine three ways, and the later ones win. A copy is fetched from this repository into `~/.agent-hud/promotions-cache.json` at most every six hours, by a background process that no status line waits on; if a fetch fails, the last good copy stays. The published package also bundles a copy, which answers before the first fetch, when the network is unavailable, and whenever it is newer than the cache. Your own `~/.agent-hud/config.json` sits on top and wins wherever the two disagree. `AGENT_HUD_NO_REMOTE=1` switches off the fetch alone; the bundled copy and your config keep working.
 
-All examples in this section are fictional. Your local configuration can add windows, disable shared entries by ID, or turn off the shared list with `"shared": false`:
+The examples below are made up. Your config can add windows, hide shared ones by `id`, or drop the shared schedule entirely with `"shared": false`:
 
 ```json
 {
@@ -149,9 +147,11 @@ All examples in this section are fictional. Your local configuration can add win
 }
 ```
 
-Times are UTC unless a window sets `"timezone"`, for example `"Asia/Shanghai"`; Agent HUD handles daylight-saving changes for valid named zones. Only `start` and `end` are required. An `end` at or before `start` crosses midnight. `days` accepts `0` for Sunday or three-letter day names, `platforms` limits a window to hosts, `from` and `until` set its date range, and `"enabled": false` turns it off. A local window with the same `id` replaces the shared one.
+Clock times are UTC, so they can be copied from a vendor announcement unchanged; the HUD converts them to your own zone. Add `"timezone": "Asia/Shanghai"` to a window if you would rather write local hours. Daylight-saving changes are handled either way, and a misspelled zone name drops that one window instead of quietly reading its hours as UTC.
 
-Use `endpoints` when a promotion belongs to an API endpoint rather than a host:
+Only `start` and `end` are required. An `end` at or before `start` crosses midnight. `days` takes `0` for Sunday or three-letter names, `platforms` limits the window to some hosts, `from` and `until` bound the campaign, and `"enabled": false` switches a window off without deleting it. A local window with the same `id` as a shared one replaces it. A window whose narrowing field has an unusable value is dropped whole, so a typo never turns into a badge that shows on every host, every day.
+
+Some discounts belong to an API rather than to a host: the vendor bills by the clock on its own endpoint, whatever program sends the request, and the same models resold elsewhere are not part of it. Those windows take `endpoints` instead of `platforms`:
 
 ```json
 {
@@ -163,7 +163,9 @@ Use `endpoints` when a promotion belongs to an API endpoint rather than a host:
 }
 ```
 
-Endpoint matching uses the host part of the base URL, so `https://api.example.com/v1` and `api.example.com` match the same entry. Claude Code identifies the endpoint from its inherited routing environment; pi uses the selected model's `baseUrl`. An endpoint promotion stays hidden when the host cannot identify the current endpoint. To inspect source paths, parsed windows, filters, and current matches, replace the example endpoint with your own and run:
+The match is on the host part of the base URL, so `https://api.example.com/v1` and `api.example.com` are the same thing. Such a window only shows up where the host can say which endpoint the current model talks to. pi reads the selected model's `baseUrl`; Claude Code reads its inherited `ANTHROPIC_BASE_URL` and cloud-provider settings, and assumes `api.anthropic.com` only when none of them is set. Everywhere else the badge stays hidden, because a program that cannot tell must not claim the discount.
+
+To see where each schedule came from, every parsed window, the filters applied, and what is active right now, run this with your own endpoint:
 
 ```bash
 node plugins/agent-hud/dist/cli.js promotions --platform claude --endpoint https://api.example.com
@@ -173,23 +175,27 @@ node plugins/agent-hud/dist/cli.js promotions --platform claude --endpoint https
 
 ### Can Codex display the same HUD as Claude Code?
 
-Codex uses a native footer, so it shows the fields Codex provides rather than every Claude Code status-line field. Its optional activity companion can show tools, subagents, and plans.
+Not all of it. Codex has its own footer, and Agent HUD fills it with the facts Codex reports, which is fewer than Claude Code's status line carries. The optional activity companion adds tools, subagents, and plans beside it.
 
-### Why are some metrics missing?
+### Why are some fields missing?
 
-The host did not supply that metric, or it is not meaningful for the current billing or runtime model. Agent HUD hides it instead of estimating it from incomplete data.
+The host did not report that fact, or it does not apply. Plan quota, for example, means nothing under API billing. Agent HUD leaves such a field out rather than estimating it.
 
 ### Why is no promotion badge shown?
 
-No configured window may match the current time, host, or endpoint. Run `node plugins/agent-hud/dist/cli.js promotions --platform claude --endpoint https://api.example.com` from the checkout with your own endpoint to inspect the loaded lists and filters. The shared list is currently empty until a campaign is verified.
+No window matches the current time, host, or endpoint. The shared schedule is empty until a campaign is verified, so a badge needs either a merged entry or a window in your own config. To see which windows were loaded and which filters excluded them, run from the checkout, with your own endpoint:
 
-### Does Agent HUD send session data to a server?
+```bash
+node plugins/agent-hud/dist/cli.js promotions --platform claude --endpoint https://api.example.com
+```
 
-Hook events stay in `~/.agent-hud`. Background requests retrieve the shared promotion schedule and registered vendor status; the promotion request is a static JSON GET with no session-data body. `AGENT_HUD_NO_REMOTE=1` stops schedule downloads, not vendor-health checks.
+### Does Agent HUD send session data anywhere?
+
+No. Hook events stay in `~/.agent-hud`. The only outbound requests are two plain GETs: one for the shared promotion schedule, a static JSON file in this repository, and one for the status page of the vendor behind the current API. Neither carries session data. `AGENT_HUD_NO_REMOTE=1` stops the schedule fetch; the status-page check is unaffected.
 
 ## Development
 
-Development requires Node.js `^20.19.0 || >=22.12.0` and npm 11.16+. Published packages retain Node.js 18 runtime compatibility. From the repository root:
+Development needs the same Node.js and npm as [Install](#install). The published packages still run on Node.js 18. From the repository root:
 
 ```bash
 npm ci
@@ -198,9 +204,9 @@ npm run lint:fix
 npm run build
 ```
 
-`npm run check` runs linting, documentation checks, and the test suite. The [provider source](packages/provider) and [shared UI plugin](plugins/agent-hud) are separate packages; see the [architecture](docs/architecture.md) for their boundary.
+`npm run check` runs the linter, the documentation link check, and the test suite. The data [provider](packages/provider) and the [UI plugin](plugins/agent-hud) are separate packages; [architecture](docs/architecture.md) describes the line between them.
 
-## Project policies
+## More documentation
 
 - [CLI reference](plugins/agent-hud/docs/cli.md)
 - [Architecture](docs/architecture.md)

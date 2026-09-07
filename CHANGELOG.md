@@ -22,7 +22,6 @@ uses semantic versioning for each published workspace package.
 ### Changed
 
 - Vendor health is selected by API endpoint and cached across supported hosts in Agent HUD's data directory.
-- The README explains host capabilities, source installation, and common configuration questions.
 - Provider internals are organized into responsibility-based hook and telemetry
   modules while retaining stable public facades.
 - The bundled CLI no longer installs a redundant runtime dependency.
