@@ -7,6 +7,8 @@ uses semantic versioning for each published workspace package.
 
 ### Added
 
+- Promotional windows from shared and local schedules, matched to the API endpoint when available.
+- A pi footer extension for promotional windows and vendor incidents.
 - Open-source governance, CI, dependency maintenance and package smoke checks.
 - A repository-activation checklist separating local evidence from external
   publishing controls.
@@ -19,6 +21,8 @@ uses semantic versioning for each published workspace package.
 
 ### Changed
 
+- Vendor health is selected by API endpoint and cached across supported hosts in Agent HUD's data directory.
+- The README explains host capabilities, source installation, and common configuration questions.
 - Provider internals are organized into responsibility-based hook and telemetry
   modules while retaining stable public facades.
 - The bundled CLI no longer installs a redundant runtime dependency.
