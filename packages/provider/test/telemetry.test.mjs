@@ -7,9 +7,16 @@ import {
   contextPercent,
   deriveClaudeTelemetry,
   extractEffort,
-  refreshAnthropicHealth,
+  healthSourceFor,
+  refreshHealth,
   spawnHealthRefresh,
 } from "../dist/index.js";
+
+const ANTHROPIC = healthSourceFor("api.anthropic.com");
+
+function healthPath(home, name) {
+  return path.join(home, ".agent-hud", "health", name);
+}
 
 test("derives raw turns, cache, effort, health, and compact measurements", async (t) => {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), "agent-hud-telemetry-"));
@@ -47,7 +54,7 @@ test("derives raw turns, cache, effort, health, and compact measurements", async
     `${now - 10}\t50\t10`,
     `${now - 5}\t70\t15`,
   ].join("\n"));
-  const healthCache = path.join(home, ".claude", "status-cache", "anthropic");
+  const healthCache = healthPath(home, ANTHROPIC.id);
   await fs.mkdir(path.dirname(healthCache), { recursive: true });
   await fs.writeFile(healthCache, "minor\n");
   await fs.utimes(healthCache, now - 10, now - 10);
@@ -60,7 +67,7 @@ test("derives raw turns, cache, effort, health, and compact measurements", async
       used_percentage: 75,
       total_input_tokens: 100_000,
     },
-  }, { home, now, writeLogs: false });
+  }, { home, now, writeLogs: false, healthSource: ANTHROPIC });
 
   assert.equal(derived.observedAt, now);
   assert.equal(derived.turns, 16);
@@ -84,6 +91,31 @@ test("derives raw turns, cache, effort, health, and compact measurements", async
     assert.equal((await fs.stat(path.dirname(healthCache))).mode & 0o777, 0o700);
     assert.equal((await fs.stat(healthCache)).mode & 0o777, 0o600);
   }
+});
+
+test("omits cached Anthropic health for a request routed elsewhere", async (t) => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "agent-hud-other-api-"));
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  const healthCache = healthPath(home, ANTHROPIC.id);
+  await fs.mkdir(path.dirname(healthCache), { recursive: true });
+  await fs.writeFile(healthCache, "major\n");
+
+  const derived = await deriveClaudeTelemetry({}, {
+    home,
+    now: 2_000_000_000,
+    writeLogs: false,
+    healthSource: healthSourceFor("api.deepseek.com"),
+  });
+
+  assert.equal(derived.apiHealthIndicator, "");
+  assert.equal(derived.healthCacheStale, false);
+});
+
+test("only registered API hosts resolve to a status source", () => {
+  assert.equal(healthSourceFor("https://api.anthropic.com/v1")?.id, ANTHROPIC.id);
+  assert.equal(healthSourceFor("api.deepseek.com"), null);
+  assert.equal(healthSourceFor("bedrock-runtime.us-east-1.amazonaws.com"), null);
+  assert.equal(healthSourceFor(undefined), null);
 });
 
 test("preserves the legacy effort fallback order including object forms", () => {
@@ -146,22 +178,17 @@ test("coalesces concurrent detached health refreshes with a private lease", asyn
   await fs.writeFile(fixture, "setTimeout(() => {}, 25);\n");
 
   const spawned = await Promise.all(
-    Array.from({ length: 16 }, () => spawnHealthRefresh(fixture, home)),
+    Array.from({ length: 16 }, () => spawnHealthRefresh(fixture, ANTHROPIC, home)),
   );
   assert.equal(spawned.filter(Boolean).length, 1);
-  const lockPath = path.join(
-    home,
-    ".claude",
-    "status-cache",
-    "anthropic-refresh.lock",
-  );
+  const lockPath = healthPath(home, `${ANTHROPIC.id}-refresh.lock`);
   assert.ok((await fs.readFile(lockPath, "utf8")).trim());
   if (process.platform !== "win32") {
     assert.equal((await fs.stat(lockPath)).mode & 0o777, 0o600);
   }
   await fs.utimes(lockPath, 0, 0);
   assert.equal(
-    await spawnHealthRefresh(fixture, home),
+    await spawnHealthRefresh(fixture, ANTHROPIC, home),
     true,
     "a crashed child lease must be recoverable after its stale margin",
   );
@@ -170,7 +197,7 @@ test("coalesces concurrent detached health refreshes with a private lease", asyn
 test("health refresh startup is fail-soft for an unwritable home", async (t) => {
   if (process.platform === "win32") return t.skip("/dev/null is not an unwritable path on Windows");
   assert.equal(
-    await spawnHealthRefresh("/missing/agent-hud-cli.js", "/dev/null"),
+    await spawnHealthRefresh("/missing/agent-hud-cli.js", ANTHROPIC, "/dev/null"),
     false,
   );
 });
@@ -178,11 +205,11 @@ test("health refresh startup is fail-soft for an unwritable home", async (t) => 
 test("keeps the last-good health indicator when a refresh fails", async (t) => {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), "agent-hud-health-failure-"));
   t.after(() => fs.rm(home, { recursive: true, force: true }));
-  const directory = path.join(home, ".claude", "status-cache");
-  const indicator = path.join(directory, "anthropic");
+  const directory = path.join(home, ".agent-hud", "health");
+  const indicator = path.join(directory, ANTHROPIC.id);
   await fs.mkdir(directory, { recursive: true });
   await fs.writeFile(indicator, "minor\n");
-  const lockPath = path.join(directory, "anthropic-refresh.lock");
+  const lockPath = path.join(directory, `${ANTHROPIC.id}-refresh.lock`);
   await fs.writeFile(lockPath, "lease-token\n");
   const originalFetch = globalThis.fetch;
   t.after(() => {
@@ -191,15 +218,36 @@ test("keeps the last-good health indicator when a refresh fails", async (t) => {
   globalThis.fetch = async () => ({ ok: false, status: 503 });
 
   await assert.rejects(
-    refreshAnthropicHealth(home, { path: lockPath, token: "lease-token" }),
+    refreshHealth(ANTHROPIC, home, { path: lockPath, token: "lease-token" }),
     /HTTP 503/,
   );
   assert.equal(await fs.readFile(indicator, "utf8"), "minor\n");
   assert.equal(
-    await fs.readFile(path.join(directory, "anthropic-attempt"), "utf8"),
+    await fs.readFile(path.join(directory, `${ANTHROPIC.id}-attempt`), "utf8"),
     "\n",
   );
   await assert.rejects(fs.stat(lockPath), { code: "ENOENT" });
+});
+
+test("an oversized status body is refused instead of parsed", async (t) => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "agent-hud-health-size-"));
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  const padding = "x".repeat(64 * 1_024);
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify({ padding, status: { indicator: "major" } }),
+  });
+
+  await assert.rejects(refreshHealth(ANTHROPIC, home), /too large/);
+  await assert.rejects(
+    fs.stat(path.join(home, ".agent-hud", "health", ANTHROPIC.id)),
+    { code: "ENOENT" },
+  );
 });
 
 test("metric write failures degrade to partial facts instead of rejecting", async () => {

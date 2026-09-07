@@ -15,7 +15,7 @@ warning severity; brightness creates hierarchy; compact advice, cache
 freshness, quota pace, and narrow-pane behavior retain their original
 semantics. See [docs/hud-design.md](docs/hud-design.md).
 
-## Two layers, four host surfaces
+## Two layers, five host surfaces
 
 The implementation has a hard package boundary:
 
@@ -35,6 +35,9 @@ host's actual payload:
   and background-task facts.
 - Codex: the native footer for model/context/limits/git/progress, plus an
   optional live companion for tools and subagents.
+- pi: its own footer already carries tokens, cost, context and branch, so the
+  extension adds one segment beside them for the promotional window and any
+  incident the API's vendor is reporting.
 
 No adapter scrapes Cursor or Antigravity transcripts, and the Codex adapter
 does not depend on Codex's unstable transcript JSONL format.
@@ -68,7 +71,8 @@ input and environment contract.
 
 ## Plugin layout
 
-The same directory carries manifests for all four hosts:
+The same directory carries manifests for the four hosts that have them; pi
+loads its extension from a file setup writes into pi's own directory:
 
 ```text
 .codex-plugin/plugin.json

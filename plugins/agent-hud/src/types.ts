@@ -3,6 +3,7 @@ import type {
   GitStatus,
   PlanItem,
   Platform,
+  PromotionStatus,
   SessionStatus,
   ToolActivity,
   UsageLimit,
@@ -52,6 +53,7 @@ export interface HudSnapshot {
   modelSeverity?: Severity;
   cache?: CacheView | null;
   compactAdvisor?: CompactAdvisor | null;
+  promotion?: PromotionStatus | null;
 }
 
 export type HudTool = ToolActivity;

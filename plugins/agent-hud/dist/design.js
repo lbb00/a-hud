@@ -51,7 +51,13 @@ var HUD_DESIGN = {
     cwdMinimumColumns: 14
   }
 };
+function healthSeverity(indicator) {
+  if (indicator === "major" || indicator === "critical") return "red";
+  if (indicator === "minor") return "yellow";
+  return "plain";
+}
 export {
-  HUD_DESIGN
+  HUD_DESIGN,
+  healthSeverity
 };
 //# sourceMappingURL=design.js.map

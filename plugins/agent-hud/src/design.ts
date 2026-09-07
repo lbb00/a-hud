@@ -1,10 +1,13 @@
 /**
  * Agent HUD visual contract, inherited from the original shell statusline.
  *
- * COLOR ENCODES WARNING LEVEL, NOTHING ELSE.
- * Plain means healthy, yellow means caution, red means act now. Hierarchy comes
- * from brightness: session facts are normal foreground; location is dim except
- * for the bright project-name anchor. Separators are dim punctuation, not data.
+ * COLOR ENCODES WARNING LEVEL, WITH ONE DELIBERATE EXCEPTION.
+ * Plain means healthy, yellow means caution, red means act now. Green marks an
+ * open promotional window, the one signal that rewards acting immediately
+ * rather than warning against it; nothing else in the HUD may use green.
+ * Hierarchy comes from brightness: session facts are normal foreground;
+ * location is dim except for the bright project-name anchor. Separators are
+ * dim punctuation, not data.
  *
  * Keep these values centralized. They are calibrated policy, not incidental
  * renderer constants, and changing one should require a focused test update.
@@ -63,3 +66,14 @@ export const HUD_DESIGN = {
 } as const;
 
 export type Severity = "plain" | "yellow" | "red";
+
+/**
+ * How loudly to show a vendor status page's indicator. The words come from
+ * statuspage's own vocabulary; anything unrecognized stays silent rather than
+ * alarming on a value this code has never seen.
+ */
+export function healthSeverity(indicator: string): Severity {
+  if (indicator === "major" || indicator === "critical") return "red";
+  if (indicator === "minor") return "yellow";
+  return "plain";
+}

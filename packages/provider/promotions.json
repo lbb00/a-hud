@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "updated": "2026-09-04",
+  "notes": "Shared promotional windows. Vendor campaigns appear in no host's status payload and change without notice, so they are maintained here by pull request instead of being hardcoded in the runtime. Clock times are UTC unless a window sets \"timezone\". This list ships empty on purpose: an unverified window is worse than no badge. See the README for the field reference.",
+  "promotions": []
+}

@@ -165,7 +165,7 @@ test("keeps the Chinese overview aligned with the setup contract", async () => {
     "utf8",
   );
 
-  assert.match(rootReadme, /`setup all` 会配置全部四个宿主/u);
+  assert.match(rootReadme, /`setup all` 会配置全部五个宿主/u);
   assert.match(rootReadme, /`setup both` 只配置 Claude Code 和 Codex/u);
   assert.match(rootReadme, /不展示不可用的 5h 额度/u);
   assert.match(rootReadme, /内部 transcript 不属于稳定契约，不会被解析/u);

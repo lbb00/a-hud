@@ -55,6 +55,11 @@ var HUD_DESIGN = {
     cwdMinimumColumns: 14
   }
 };
+function healthSeverity(indicator) {
+  if (indicator === "major" || indicator === "critical") return "red";
+  if (indicator === "minor") return "yellow";
+  return "plain";
+}
 
 // ../../node_modules/get-east-asian-width/lookup-data.js
 var ambiguousMinimalCodePoint = 161;
@@ -271,6 +276,7 @@ var RESET2 = "\x1B[0m";
 var PALETTE = {
   dim: "\x1B[2m",
   bright: "\x1B[97m",
+  green: "\x1B[32m",
   yellow: "\x1B[33m",
   red: "\x1B[31m"
 };
@@ -386,6 +392,34 @@ function formatReset(value, includeWeekday = false) {
   const weekday = new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(date);
   return `${weekday}${hhmm}`;
 }
+function compactDuration(seconds) {
+  const total = Math.max(0, Math.floor(seconds));
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor(total % 86400 / 3600);
+  const minutes = Math.floor(total % 3600 / 60);
+  if (days) return hours ? `${days}d${hours}h` : `${days}d`;
+  if (hours) return `${hours}h${String(minutes).padStart(2, "0")}`;
+  return `${minutes}m`;
+}
+function promotionToken(snapshot, colors) {
+  const promotion = snapshot.promotion;
+  const now = isFiniteNumber(snapshot.observedAt) && snapshot.observedAt > 0 ? snapshot.observedAt : Date.now() / 1e3;
+  const text = promotionText(promotion, now);
+  if (!text) return "";
+  return promotion?.active ? paint("green", text, colors) : text;
+}
+function promotionText(promotion, now) {
+  if (!promotion) return "";
+  const label = displayText(promotion.label).slice(0, 8);
+  if (promotion.changesAt === null) return promotion.active ? `%${label}` : "";
+  if (!isFiniteNumber(promotion.changesAt)) return "";
+  const time = compactDuration(promotion.changesAt - now);
+  return `%${label}${label ? " " : ""}${promotion.active ? "" : "\u2191"}${time}`;
+}
+function incidentText(indicator, label) {
+  if (healthSeverity(indicator) === "plain") return "";
+  return `!${displayText(label).slice(0, 12)}`;
+}
 function compactTokens(value) {
   if (!isFiniteNumber(value)) return "";
   return value >= 1e3 ? `${Math.floor(value / 1e3)}k` : `${Math.floor(value)}`;
@@ -475,6 +509,8 @@ function renderSnapshot(snapshot, options = {}) {
   if (resets.length) {
     line1.push(`\u21BB${resets.join("/")}`);
   }
+  const promotion = promotionToken(snapshot, colors);
+  if (promotion) line1.push(promotion);
   const lines = [];
   if (line1.length) lines.push(line1.join(separator));
   const line2 = [];
@@ -540,6 +576,8 @@ function renderSnapshot(snapshot, options = {}) {
   return (columns ? lines.map((line) => truncateRight(line, columns)) : lines).join("\n");
 }
 export {
+  incidentText,
+  promotionText,
   renderSnapshot,
   visibleLength
 };

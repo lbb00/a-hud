@@ -3,16 +3,11 @@ import {
   type ClaudeSessionFacts,
   type GitStatus,
   type HostSessionFacts,
+  type PromotionStatus,
   type ProviderState,
 } from "@agent-hud/provider";
-import { HUD_DESIGN, type Severity } from "./design.js";
+import { healthSeverity, HUD_DESIGN } from "./design.js";
 import type { CacheView, CompactAdvisor, HudSnapshot } from "./types.js";
-
-function healthSeverity(indicator: string): Severity {
-  if (indicator === "major" || indicator === "critical") return "red";
-  if (indicator === "minor") return "yellow";
-  return "plain";
-}
 
 function cacheView(
   facts: ClaudeSessionFacts,
@@ -64,6 +59,7 @@ function compactAdvisor(
 export function snapshotFromClaude(
   facts: ClaudeSessionFacts,
   git: GitStatus | null = null,
+  promotion: PromotionStatus | null = null,
 ): HudSnapshot {
   const cwd = facts.cwd;
   return {
@@ -90,12 +86,14 @@ export function snapshotFromClaude(
     modelSeverity: healthSeverity(facts.apiHealthIndicator),
     cache: cacheView(facts),
     compactAdvisor: compactAdvisor(facts),
+    promotion,
   };
 }
 
 export function snapshotFromState(
   state: ProviderState,
   git: GitStatus | null = null,
+  promotion: PromotionStatus | null = null,
 ): HudSnapshot {
   const cwd = state.cwd;
   return {
@@ -122,6 +120,7 @@ export function snapshotFromState(
     modelSeverity: "plain",
     cache: null,
     compactAdvisor: null,
+    promotion,
   };
 }
 
@@ -133,6 +132,7 @@ export function snapshotFromState(
 export function snapshotFromCursor(
   facts: HostSessionFacts,
   git: GitStatus | null = null,
+  promotion: PromotionStatus | null = null,
 ): HudSnapshot {
   const cwd = facts.cwd;
   return {
@@ -159,12 +159,14 @@ export function snapshotFromCursor(
     modelSeverity: "plain",
     cache: null,
     compactAdvisor: null,
+    promotion,
   };
 }
 
 export function snapshotFromAntigravity(
   facts: HostSessionFacts,
   fallbackGit: GitStatus | null = null,
+  promotion: PromotionStatus | null = null,
 ): HudSnapshot {
   const cwd = facts.cwd;
   return {
@@ -191,5 +193,6 @@ export function snapshotFromAntigravity(
     modelSeverity: "plain",
     cache: null,
     compactAdvisor: null,
+    promotion,
   };
 }

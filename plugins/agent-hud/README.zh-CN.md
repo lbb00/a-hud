@@ -14,7 +14,7 @@ agent-hud |  main*↑2 | +128/-17 | /workspace/agent-hud
 UI 契约继承已有 shell HUD：颜色只表达风险，亮度负责层级；上下文压力、缓存新鲜度、
 额度节奏、compact 建议和窄终端行为保持统一语义。
 
-## 两层实现，四个宿主
+## 两层实现，五个宿主
 
 - `@agent-hud/provider` 收集并规范化原始事实，负责 I/O、事件状态、Git 和派生遥测，
   不包含颜色、字符或布局策略。
@@ -27,6 +27,8 @@ UI 契约继承已有 shell HUD：颜色只表达风险，亮度负责层级；�
 - Antigravity CLI：使用相同 renderer，并接入原生额度、VCS、生命周期和后台任务事实。
 - Codex：原生 footer 展示模型、上下文、额度、Git 和进度；可选 companion 展示工具、
   子代理和计划活动。
+- pi：自带 footer 已有 token、成本、上下文和分支，扩展只在旁边插一段，放当前 API 的
+  优惠时段和厂商故障提示。
 
 实现不会读取 Codex、Cursor 或 Antigravity 的内部 transcript。
 

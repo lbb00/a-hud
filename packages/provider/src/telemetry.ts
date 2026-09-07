@@ -13,9 +13,10 @@ import type { ClaudeStatusInput } from "./types.js";
 import { PROVIDER_DEFAULTS } from "./telemetry/config.js";
 import {
   healthState,
-  refreshAnthropicHealth,
+  refreshHealth,
   spawnHealthRefresh,
 } from "./telemetry/health.js";
+import type { HealthSource } from "./telemetry/health-sources.js";
 import {
   inferCacheTtl,
   readTranscriptFacts,
@@ -23,7 +24,7 @@ import {
 } from "./telemetry/transcript.js";
 
 export { PROVIDER_DEFAULTS };
-export { refreshAnthropicHealth, spawnHealthRefresh };
+export { healthState, refreshHealth, spawnHealthRefresh };
 export { inferCacheTtl, transcriptTurns };
 
 export interface CacheTelemetry {
@@ -51,6 +52,12 @@ export interface DeriveClaudeOptions {
   home?: string;
   now?: number;
   writeLogs?: boolean;
+  /**
+   * Status page to read, when the API this session actually calls has one.
+   * Omitted means no signal: a session routed somewhere else must not be
+   * colored by a vendor whose service it never touches.
+   */
+  healthSource?: HealthSource | null;
   compactTargetPercent?: number;
   compactSummaryTokens?: number;
   recentContextRows?: number;
@@ -262,7 +269,9 @@ export async function deriveClaudeTelemetry(
   const transcriptPath = input.transcript_path || "";
   const transcript = await readTranscriptFacts(transcriptPath, home);
   const turns = transcript?.turns ?? 0;
-  const health = await healthState(home, now);
+  const health = options.healthSource
+    ? await healthState(options.healthSource, now, home)
+    : { indicator: "", stale: false };
   const writeLogs = options.writeLogs ?? true;
   if (writeLogs) await logCost(input, home, now);
   return {

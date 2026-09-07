@@ -22,6 +22,7 @@
     "lint": "oxlint . --deny-warnings",
     "lint:fix": "oxlint . --fix",
     "docs:check": "node scripts/check-doc-links.mjs",
+    "promotions:generate": "node scripts/generate-promotions.mjs",
     "check": "npm run lint && npm run docs:check && npm test",
     "package:lint": "publint run packages/provider --pack npm --strict && publint run plugins/agent-hud --pack npm --strict && attw --pack packages/provider --profile esm-only --no-definitely-typed --format table --no-emoji --no-color",
     "package:smoke": "npm run build && node scripts/package-smoke.mjs",

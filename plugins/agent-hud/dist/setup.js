@@ -295,6 +295,21 @@ async function setupClaude(options = {}) {
   const content = patchClaudeSettings(original, options.executable, options.cliPath);
   return { filePath, ...await writeWithBackup(filePath, content, options.dryRun) };
 }
+function piExtensionModule(cliPath = CLI_PATH) {
+  const target = path.join(path.dirname(cliPath), "pi-extension.js");
+  return `// Written by \`agent-hud setup pi\`. Edit the plugin, not this file.
+export { default } from ${JSON.stringify(target)};
+`;
+}
+async function setupPi(options = {}) {
+  const root = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
+  const filePath = options.config || path.join(root, "extensions", "agent-hud.ts");
+  const content = piExtensionModule(options.cliPath);
+  return {
+    filePath,
+    ...await writeWithBackup(filePath, content, options.dryRun)
+  };
+}
 async function readOptional(filePath) {
   try {
     return await fs.readFile(filePath, "utf8");
@@ -358,9 +373,11 @@ export {
   patchCodexConfig,
   patchCursorConfig,
   patchCursorHooks,
+  piExtensionModule,
   setupAntigravity,
   setupClaude,
   setupCodex,
-  setupCursor
+  setupCursor,
+  setupPi
 };
 //# sourceMappingURL=setup.js.map

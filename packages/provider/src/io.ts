@@ -276,9 +276,13 @@ export async function readJsonStdin(stream: NodeJS.ReadStream = process.stdin): 
   }
 }
 
+/** Root of the local Agent HUD directory: durable state and user config. */
+export function resolveBaseDir(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string {
+  return env.AGENT_HUD_DATA_DIR || path.join(home, ".agent-hud");
+}
+
 export function resolveDataDir(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string {
-  const base = env.AGENT_HUD_DATA_DIR || path.join(home, ".agent-hud");
-  return path.join(base, "events");
+  return path.join(resolveBaseDir(env, home), "events");
 }
 
 export function eventFileFor(dataDir: string, sessionKey: string): string {

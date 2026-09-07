@@ -8,23 +8,43 @@ import {
   ensurePrivateDirectory,
   ensurePrivateFile,
   repairPrivateDirectory,
+  resolveBaseDir,
 } from "../io.js";
 import { PROVIDER_DEFAULTS } from "./config.js";
+import type { HealthSource } from "./health-sources.js";
 
 const HEALTH_REFRESH_LOCK_STALE_MS = 30_000;
+const FETCH_TIMEOUT_MS = 4_000;
+/** A status page answers with a few kilobytes; larger bodies are not parsed. */
+const MAX_STATUS_BYTES = 64 * 1_024;
 
 interface HealthRefreshLease {
   path: string;
   token: string;
 }
 
-export async function healthState(home: string, now: number): Promise<{
+/**
+ * One directory under Agent HUD's own root, beside the promotional cache,
+ * rather than inside a single host's home. The state is shared by every host
+ * that reaches the same API, so it does not belong to any one of them.
+ */
+function healthDirectory(env: NodeJS.ProcessEnv, home: string): string {
+  return path.join(resolveBaseDir(env, home), "health");
+}
+
+export async function healthState(
+  source: HealthSource,
+  now: number,
+  home = os.homedir(),
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<{
   indicator: string;
   stale: boolean;
 }> {
-  const filePath = path.join(home, ".claude", "status-cache", "anthropic");
-  const attemptPath = path.join(home, ".claude", "status-cache", "anthropic-attempt");
-  await repairPrivateDirectory(path.dirname(filePath));
+  const directory = healthDirectory(env, home);
+  const filePath = path.join(directory, source.id);
+  const attemptPath = path.join(directory, `${source.id}-attempt`);
+  await repairPrivateDirectory(directory);
   let indicator = "";
   let mtime = 0;
   try {
@@ -50,11 +70,13 @@ export async function healthState(home: string, now: number): Promise<{
 }
 
 async function acquireHealthRefreshLease(
+  source: HealthSource,
   home: string,
+  env: NodeJS.ProcessEnv,
   now = Date.now(),
 ): Promise<HealthRefreshLease | null> {
-  const directory = path.join(home, ".claude", "status-cache");
-  const lockPath = path.join(directory, "anthropic-refresh.lock");
+  const directory = healthDirectory(env, home);
+  const lockPath = path.join(directory, `${source.id}-refresh.lock`);
   await ensurePrivateDirectory(directory);
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -96,16 +118,19 @@ async function releaseHealthRefreshLease(lease: HealthRefreshLease): Promise<voi
 }
 
 /**
- * Start at most one detached status refresh across concurrent statusline
- * renderers. The child owns a short lease and releases it in finally.
+ * Start at most one detached status refresh across concurrent hosts. The lease
+ * is per source, so two vendors can refresh at once while two hosts asking for
+ * the same vendor produce a single request. The child releases it in finally.
  */
 export async function spawnHealthRefresh(
   cliPath: string,
+  source: HealthSource,
   home = os.homedir(),
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<boolean> {
   let lease: HealthRefreshLease | null;
   try {
-    lease = await acquireHealthRefreshLease(home);
+    lease = await acquireHealthRefreshLease(source, home, env);
   } catch {
     return false;
   }
@@ -114,6 +139,8 @@ export async function spawnHealthRefresh(
     const child = spawn(process.execPath, [
       cliPath,
       "refresh-health",
+      "--source",
+      source.id,
       "--home",
       home,
       "--refresh-lock",
@@ -135,23 +162,29 @@ export async function spawnHealthRefresh(
   }
 }
 
-export async function refreshAnthropicHealth(
+export async function refreshHealth(
+  source: HealthSource,
   home = os.homedir(),
   lease?: HealthRefreshLease,
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
-  const directory = path.join(home, ".claude", "status-cache");
-  const filePath = path.join(directory, "anthropic");
-  const attemptPath = path.join(directory, "anthropic-attempt");
+  const directory = healthDirectory(env, home);
+  const filePath = path.join(directory, source.id);
+  const attemptPath = path.join(directory, `${source.id}-attempt`);
   try {
     await ensurePrivateDirectory(directory);
     await atomicWritePrivate(attemptPath, "\n");
-    const response = await fetch("https://status.claude.com/api/v2/status.json", {
-      signal: AbortSignal.timeout(4_000),
+    const response = await fetch(source.url, {
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      headers: { accept: "application/json" },
     });
-    if (!response.ok) throw new Error(`Anthropic status: HTTP ${response.status}`);
-    const body = await response.json() as { status?: { indicator?: string } };
-    const indicator = body.status?.indicator;
-    if (!indicator) throw new Error("Anthropic status: missing indicator");
+    if (!response.ok) throw new Error(`${source.id}: HTTP ${response.status}`);
+    const raw = await response.text();
+    if (Buffer.byteLength(raw, "utf8") > MAX_STATUS_BYTES) {
+      throw new Error(`${source.id}: response too large`);
+    }
+    const indicator = source.read(JSON.parse(raw) as unknown);
+    if (!indicator) throw new Error(`${source.id}: missing indicator`);
     await atomicWritePrivate(filePath, `${indicator}\n`);
   } finally {
     if (lease) await releaseHealthRefreshLease(lease);

@@ -47,9 +47,16 @@ async function prepareHome(root, name, transcript, now) {
     `${now - 20}\t50\t10`,
     `${now - 10}\t70\t15`,
   ].join("\n") + "\n");
+  // The shell HUD reads the vendor status from its own home directory; the
+  // port keeps it in Agent HUD's namespace. Both are seeded so the comparison
+  // stays about rendering rather than about where the cache lives.
   const health = path.join(claude, "status-cache", "anthropic");
   await fs.writeFile(health, "none\n");
   await fs.utimes(health, now, now);
+  const portedHealth = path.join(home, ".agent-hud", "health", "anthropic-statuspage");
+  await fs.mkdir(path.dirname(portedHealth), { recursive: true });
+  await fs.writeFile(portedHealth, "none\n");
+  await fs.utimes(portedHealth, now, now);
   const transcriptPath = path.join(home, "transcript.jsonl");
   await fs.writeFile(transcriptPath, transcript);
   await fs.utimes(transcriptPath, now - 100, now - 100);
