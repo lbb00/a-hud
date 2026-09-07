@@ -142,7 +142,9 @@ test("the promotions command reports the config and a local switchover time", as
 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stderr, "");
-  assert.match(result.stdout, new RegExp(`config: ${configPath}`));
+  // A plain substring check: a Windows path in a RegExp would read every
+  // backslash as an escape and fail to match its own output.
+  assert.ok(result.stdout.includes(`config: ${configPath}`), result.stdout);
   assert.match(result.stdout, /local zone: \S+/);
   assert.match(result.stdout, /filter: platform all; endpoint not provided/);
   assert.match(result.stdout, /local  allday  50%  00:00-23:59  UTC  all hosts/);

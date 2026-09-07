@@ -231,6 +231,38 @@ test("an around-the-clock campaign counts down to its last day, not to tonight",
   );
 });
 
+test("a campaign longer than the scan reaches its real last day", () => {
+  // The scan only looks eight days ahead; the badge must still count down to
+  // the end of September, not to wherever the scan happened to stop.
+  const campaign = {
+    id: "month",
+    label: "+50%",
+    timezone: "UTC",
+    start: "00:00",
+    end: "00:00",
+    from: "2026-09-01",
+    until: "2026-09-30",
+  };
+  const now = utcSeconds(2026, 9, 7, 12, 0);
+  const status = resolvePromotion([campaign], { now });
+  assert.equal(status.active, true);
+  assert.equal(status.changesAt, utcSeconds(2026, 10, 1, 0, 0));
+
+  // 2026-09-07 is a Monday: a weekday-only run pauses at Saturday regardless.
+  const weekdays = { ...campaign, days: [1, 2, 3, 4, 5] };
+  assert.equal(
+    resolvePromotion([weekdays], { now }).changesAt,
+    utcSeconds(2026, 9, 12, 0, 0),
+  );
+
+  // No `until` and no pause: reported as open for the next year rather than
+  // as an infinite instant, which would leave nothing to render.
+  const endless = { ...campaign, until: undefined };
+  const openUntil = resolvePromotion([endless], { now }).changesAt;
+  assert.ok(Number.isFinite(openUntil));
+  assert.ok(openUntil - now >= 365 * 86_400, String(openUntil));
+});
+
 test("honors weekday, campaign-date and host filters", () => {
   // 2026-09-05 is a Saturday; 2026-09-03 is a Thursday.
   const weekend = {

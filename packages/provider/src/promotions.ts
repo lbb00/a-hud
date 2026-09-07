@@ -336,7 +336,7 @@ export function resolvePromotion(
           id: window.id,
           label: window.label,
           active: true,
-          changesAt: runEnd(occurrences, occurrence),
+          changesAt: runEnd(occurrences, occurrence, now),
         };
       }
       if (

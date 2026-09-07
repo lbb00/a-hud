@@ -148,10 +148,12 @@ export function sharedCacheStale(
   now = Date.now() / 1_000,
 ): boolean {
   if (remoteFetchDisabled(env)) return false;
-  // A cache written for a different URL does not count as fetched, so changing
-  // the override takes effect on the next repaint instead of six hours later.
+  // A cache or an attempt made for a different URL does not count as fetched,
+  // so changing the override takes effect on the next repaint instead of six
+  // hours later.
   const cacheAge = readCachedSchedule(env) ? mtimeSeconds(sharedCachePath(env)) : 0;
-  const age = now - Math.max(cacheAge, mtimeSeconds(attemptPath(env)));
+  const attemptAge = attemptForCurrentUrl(env) ? mtimeSeconds(attemptPath(env)) : 0;
+  const age = now - Math.max(cacheAge, attemptAge);
   // A clock moved backwards, or an mtime from the future, would otherwise
   // freeze the cache. The tolerance is there because a file written this
   // instant can carry an mtime a fraction of a second ahead of Date.now(), and
@@ -168,6 +170,19 @@ function mtimeSeconds(filePath: string): number {
 }
 
 /**
+ * The attempt marker carries the URL it was made for after the timestamp, so a
+ * fetch of the previous URL never rate-limits the first fetch of the new one.
+ * Its mtime says when; the timestamp inside is only there for a human reading
+ * the data directory.
+ */
+function attemptForCurrentUrl(env: NodeJS.ProcessEnv): boolean {
+  const text = readSmallFile(attemptPath(env), 4_096);
+  if (text == null) return false;
+  const fields = text.trim().split(/\s+/);
+  return fields.length === 2 && fields[1] === sharedPromotionsUrl(env);
+}
+
+/**
  * Schedules a refresh when the cache is due, and reports whether one started.
  * The attempt marker is written here, before the child exists, because the
  * status line repaints again within seconds and would otherwise spawn a second
@@ -181,7 +196,7 @@ export async function spawnPromotionsRefresh(
   try {
     await atomicWritePrivate(
       attemptPath(env),
-      `${Math.floor(Date.now() / 1_000)}\n`,
+      `${Math.floor(Date.now() / 1_000)} ${sharedPromotionsUrl(env)}\n`,
     );
     const child = spawn(process.execPath, [cliPath, "refresh-promotions"], {
       detached: true,

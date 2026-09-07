@@ -5,7 +5,9 @@ import { fileURLToPath } from "node:url";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { createHash, randomUUID } from "node:crypto";
 var MAX_STDIN_BYTES = 256 * 1024;
+var HYGIENE_TEMP_PREFIX = ".agent-hud-tmp-";
 var DEFAULT_SWEEP_INTERVAL_MS = 6 * 60 * 60 * 1e3;
 var DEFAULT_STALE_LOCK_MS = 5 * 60 * 1e3;
 var DEFAULT_TEMP_MAX_AGE_MS = 24 * 60 * 60 * 1e3;
@@ -25,6 +27,42 @@ async function ensurePrivateFile(filePath) {
   } catch {
   }
 }
+var RENAME_RETRY_ATTEMPTS = 5;
+var RENAME_RETRY_DELAY_MS = 20;
+async function renameWithRetry(temporary, filePath) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await fs.rename(temporary, filePath);
+      return;
+    } catch (error) {
+      const code = errorCode(error);
+      if (attempt >= RENAME_RETRY_ATTEMPTS || code !== "EPERM" && code !== "EBUSY") {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, RENAME_RETRY_DELAY_MS));
+    }
+  }
+}
+async function atomicWritePrivate(filePath, contents) {
+  const directory = path.dirname(filePath);
+  const temporary = path.join(directory, `${HYGIENE_TEMP_PREFIX}${path.basename(filePath)}-${process.pid}-${randomUUID()}`);
+  await ensurePrivateDirectory(directory);
+  try {
+    await fs.writeFile(temporary, contents, { encoding: "utf8", mode: 384 });
+    await ensurePrivateFile(temporary);
+    await renameWithRetry(temporary, filePath);
+    await ensurePrivateFile(filePath);
+  } catch (error) {
+    try {
+      await fs.unlink(temporary);
+    } catch {
+    }
+    throw error;
+  }
+}
+function errorCode(error) {
+  return typeof error === "object" && error !== null && "code" in error ? String(error.code) : "";
+}
 function resolveBaseDir(env = process.env, home = os.homedir()) {
   return env.AGENT_HUD_DATA_DIR || path.join(home, ".agent-hud");
 }
@@ -38,6 +76,7 @@ function safeText(value, max = 80) {
 import path3 from "node:path";
 
 // ../../packages/provider/dist/promotions/remote.js
+import { spawn } from "node:child_process";
 import fs2 from "node:fs";
 import path2 from "node:path";
 
@@ -126,7 +165,8 @@ function sharedCacheStale(env = process.env, now = Date.now() / 1e3) {
   if (remoteFetchDisabled(env))
     return false;
   const cacheAge = readCachedSchedule(env) ? mtimeSeconds(sharedCachePath(env)) : 0;
-  const age = now - Math.max(cacheAge, mtimeSeconds(attemptPath(env)));
+  const attemptAge = attemptForCurrentUrl(env) ? mtimeSeconds(attemptPath(env)) : 0;
+  const age = now - Math.max(cacheAge, attemptAge);
   return !(age > -CLOCK_SKEW_SECONDS && age < CACHE_TTL_SECONDS);
 }
 function mtimeSeconds(filePath) {
@@ -136,12 +176,37 @@ function mtimeSeconds(filePath) {
     return 0;
   }
 }
+function attemptForCurrentUrl(env) {
+  const text = readSmallFile(attemptPath(env), 4096);
+  if (text == null)
+    return false;
+  const fields = text.trim().split(/\s+/);
+  return fields.length === 2 && fields[1] === sharedPromotionsUrl(env);
+}
+async function spawnPromotionsRefresh(cliPath, env = process.env) {
+  if (!sharedCacheStale(env))
+    return false;
+  try {
+    await atomicWritePrivate(attemptPath(env), `${Math.floor(Date.now() / 1e3)} ${sharedPromotionsUrl(env)}
+`);
+    const child = spawn(process.execPath, [cliPath, "refresh-promotions"], {
+      detached: true,
+      stdio: "ignore"
+    });
+    child.once("error", () => void 0);
+    child.unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // ../../packages/provider/dist/promotions/clock.js
 var CLOCK_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 var DEFAULT_ZONE = "UTC";
 var SCAN_DAYS_BACK = 1;
 var SCAN_DAYS_FORWARD = 8;
+var RUN_CAP_DAYS = 366;
 function clockMinutes(value) {
   if (typeof value !== "string")
     return null;
@@ -192,38 +257,62 @@ function zonedEpoch(timeZone, year, month, day, minutes) {
 function civilDateKey(year, month, day) {
   return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
-function occurrencesFor(window, now) {
+function windowBounds(window) {
   const startMinutes = clockMinutes(window.start);
   const endMinutes = clockMinutes(window.end);
   if (startMinutes == null || endMinutes == null)
-    return [];
-  const zone = window.timezone || DEFAULT_ZONE;
+    return null;
+  return { zone: window.timezone || DEFAULT_ZONE, startMinutes, endMinutes };
+}
+function scanBase(zone, now) {
   const today = zonedParts(zone, now);
-  const base = Date.UTC(today.year, today.month - 1, today.day);
+  return Date.UTC(today.year, today.month - 1, today.day);
+}
+function occurrenceOn(window, bounds, base, offset) {
+  const civil = new Date(base + offset * 864e5);
+  const year = civil.getUTCFullYear();
+  const month = civil.getUTCMonth() + 1;
+  const day = civil.getUTCDate();
+  if (window.days && !window.days.includes(civil.getUTCDay()))
+    return null;
+  const key = civilDateKey(year, month, day);
+  if (window.from && key < window.from)
+    return null;
+  if (window.until && key > window.until)
+    return null;
+  const startsAt = zonedEpoch(bounds.zone, year, month, day, bounds.startMinutes);
+  const endsAt = bounds.endMinutes > bounds.startMinutes ? zonedEpoch(bounds.zone, year, month, day, bounds.endMinutes) : zonedEpoch(bounds.zone, year, month, day + 1, bounds.endMinutes);
+  return { window, startsAt, endsAt };
+}
+function occurrencesFor(window, now) {
+  const bounds = windowBounds(window);
+  if (!bounds)
+    return [];
+  const base = scanBase(bounds.zone, now);
   const occurrences = [];
   for (let offset = -SCAN_DAYS_BACK; offset <= SCAN_DAYS_FORWARD; offset += 1) {
-    const civil = new Date(base + offset * 864e5);
-    const year = civil.getUTCFullYear();
-    const month = civil.getUTCMonth() + 1;
-    const day = civil.getUTCDate();
-    if (window.days && !window.days.includes(civil.getUTCDay()))
-      continue;
-    const key = civilDateKey(year, month, day);
-    if (window.from && key < window.from)
-      continue;
-    if (window.until && key > window.until)
-      continue;
-    const startsAt = zonedEpoch(zone, year, month, day, startMinutes);
-    const endsAt = endMinutes > startMinutes ? zonedEpoch(zone, year, month, day, endMinutes) : zonedEpoch(zone, year, month, day + 1, endMinutes);
-    occurrences.push({ window, startsAt, endsAt });
+    const occurrence = occurrenceOn(window, bounds, base, offset);
+    if (occurrence)
+      occurrences.push(occurrence);
   }
   return occurrences;
 }
-function runEnd(occurrences, active) {
+function runEnd(occurrences, active, now) {
   let end = active.endsAt;
   for (const occurrence of occurrences) {
     if (occurrence.startsAt <= end && occurrence.endsAt > end)
       end = occurrence.endsAt;
+  }
+  const bounds = windowBounds(active.window);
+  if (!bounds)
+    return end;
+  const base = scanBase(bounds.zone, now);
+  for (let offset = SCAN_DAYS_FORWARD + 1; offset <= RUN_CAP_DAYS; offset += 1) {
+    const next = occurrenceOn(active.window, bounds, base, offset);
+    if (!next || next.startsAt > end)
+      break;
+    if (next.endsAt > end)
+      end = next.endsAt;
   }
   return end;
 }
@@ -399,7 +488,7 @@ function resolvePromotion(windows, options = {}) {
           id: window.id,
           label: window.label,
           active: true,
-          changesAt: runEnd(occurrences, occurrence)
+          changesAt: runEnd(occurrences, occurrence, now)
         };
       }
       if (occurrence.startsAt > now && (!pending || occurrence.startsAt < pending.startsAt)) {
@@ -434,8 +523,8 @@ var PROVIDER_DEFAULTS = {
 };
 
 // ../../packages/provider/dist/telemetry/health.js
-import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { spawn as spawn2 } from "node:child_process";
+import { randomUUID as randomUUID2 } from "node:crypto";
 import fs3 from "node:fs/promises";
 import os2 from "node:os";
 import path4 from "node:path";
@@ -472,7 +561,7 @@ async function acquireHealthRefreshLease(source, home, env, now = Date.now()) {
   const lockPath = path4.join(directory, `${source.id}-refresh.lock`);
   await ensurePrivateDirectory(directory);
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const token = randomUUID();
+    const token = randomUUID2();
     try {
       const handle = await fs3.open(lockPath, "wx", 384);
       try {
@@ -521,7 +610,7 @@ async function spawnHealthRefresh(cliPath, source, home = os2.homedir(), env = p
   if (!lease)
     return false;
   try {
-    const child = spawn(process.execPath, [
+    const child = spawn2(process.execPath, [
       cliPath,
       "refresh-health",
       "--source",
@@ -657,6 +746,7 @@ function pi_extension_default(pi) {
     render(ctx, endpoint);
     void (async () => {
       try {
+        await spawnPromotionsRefresh(CLI_PATH);
         await readHealth(endpoint);
       } catch {
       }

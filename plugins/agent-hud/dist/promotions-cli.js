@@ -106,7 +106,8 @@ function sharedCacheStale(env = process.env, now = Date.now() / 1e3) {
   if (remoteFetchDisabled(env))
     return false;
   const cacheAge = readCachedSchedule(env) ? mtimeSeconds(sharedCachePath(env)) : 0;
-  const age = now - Math.max(cacheAge, mtimeSeconds(attemptPath(env)));
+  const attemptAge = attemptForCurrentUrl(env) ? mtimeSeconds(attemptPath(env)) : 0;
+  const age = now - Math.max(cacheAge, attemptAge);
   return !(age > -CLOCK_SKEW_SECONDS && age < CACHE_TTL_SECONDS);
 }
 function mtimeSeconds(filePath) {
@@ -116,12 +117,20 @@ function mtimeSeconds(filePath) {
     return 0;
   }
 }
+function attemptForCurrentUrl(env) {
+  const text = readSmallFile(attemptPath(env), 4096);
+  if (text == null)
+    return false;
+  const fields = text.trim().split(/\s+/);
+  return fields.length === 2 && fields[1] === sharedPromotionsUrl(env);
+}
 
 // ../../packages/provider/dist/promotions/clock.js
 var CLOCK_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 var DEFAULT_ZONE = "UTC";
 var SCAN_DAYS_BACK = 1;
 var SCAN_DAYS_FORWARD = 8;
+var RUN_CAP_DAYS = 366;
 function clockMinutes(value) {
   if (typeof value !== "string")
     return null;
@@ -172,38 +181,62 @@ function zonedEpoch(timeZone, year, month, day, minutes) {
 function civilDateKey(year, month, day) {
   return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
-function occurrencesFor(window, now) {
+function windowBounds(window) {
   const startMinutes = clockMinutes(window.start);
   const endMinutes = clockMinutes(window.end);
   if (startMinutes == null || endMinutes == null)
-    return [];
-  const zone = window.timezone || DEFAULT_ZONE;
+    return null;
+  return { zone: window.timezone || DEFAULT_ZONE, startMinutes, endMinutes };
+}
+function scanBase(zone, now) {
   const today = zonedParts(zone, now);
-  const base = Date.UTC(today.year, today.month - 1, today.day);
+  return Date.UTC(today.year, today.month - 1, today.day);
+}
+function occurrenceOn(window, bounds, base, offset) {
+  const civil = new Date(base + offset * 864e5);
+  const year = civil.getUTCFullYear();
+  const month = civil.getUTCMonth() + 1;
+  const day = civil.getUTCDate();
+  if (window.days && !window.days.includes(civil.getUTCDay()))
+    return null;
+  const key = civilDateKey(year, month, day);
+  if (window.from && key < window.from)
+    return null;
+  if (window.until && key > window.until)
+    return null;
+  const startsAt = zonedEpoch(bounds.zone, year, month, day, bounds.startMinutes);
+  const endsAt = bounds.endMinutes > bounds.startMinutes ? zonedEpoch(bounds.zone, year, month, day, bounds.endMinutes) : zonedEpoch(bounds.zone, year, month, day + 1, bounds.endMinutes);
+  return { window, startsAt, endsAt };
+}
+function occurrencesFor(window, now) {
+  const bounds = windowBounds(window);
+  if (!bounds)
+    return [];
+  const base = scanBase(bounds.zone, now);
   const occurrences = [];
   for (let offset = -SCAN_DAYS_BACK; offset <= SCAN_DAYS_FORWARD; offset += 1) {
-    const civil = new Date(base + offset * 864e5);
-    const year = civil.getUTCFullYear();
-    const month = civil.getUTCMonth() + 1;
-    const day = civil.getUTCDate();
-    if (window.days && !window.days.includes(civil.getUTCDay()))
-      continue;
-    const key = civilDateKey(year, month, day);
-    if (window.from && key < window.from)
-      continue;
-    if (window.until && key > window.until)
-      continue;
-    const startsAt = zonedEpoch(zone, year, month, day, startMinutes);
-    const endsAt = endMinutes > startMinutes ? zonedEpoch(zone, year, month, day, endMinutes) : zonedEpoch(zone, year, month, day + 1, endMinutes);
-    occurrences.push({ window, startsAt, endsAt });
+    const occurrence = occurrenceOn(window, bounds, base, offset);
+    if (occurrence)
+      occurrences.push(occurrence);
   }
   return occurrences;
 }
-function runEnd(occurrences, active) {
+function runEnd(occurrences, active, now) {
   let end = active.endsAt;
   for (const occurrence of occurrences) {
     if (occurrence.startsAt <= end && occurrence.endsAt > end)
       end = occurrence.endsAt;
+  }
+  const bounds = windowBounds(active.window);
+  if (!bounds)
+    return end;
+  const base = scanBase(bounds.zone, now);
+  for (let offset = SCAN_DAYS_FORWARD + 1; offset <= RUN_CAP_DAYS; offset += 1) {
+    const next = occurrenceOn(active.window, bounds, base, offset);
+    if (!next || next.startsAt > end)
+      break;
+    if (next.endsAt > end)
+      end = next.endsAt;
   }
   return end;
 }
@@ -375,7 +408,7 @@ function resolvePromotion(windows, options = {}) {
           id: window.id,
           label: window.label,
           active: true,
-          changesAt: runEnd(occurrences, occurrence)
+          changesAt: runEnd(occurrences, occurrence, now)
         };
       }
       if (occurrence.startsAt > now && (!pending || occurrence.startsAt < pending.startsAt)) {

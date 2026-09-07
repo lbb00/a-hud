@@ -36,20 +36,27 @@ function fakePi(baseUrl) {
   };
 }
 
-async function withConfig(windows, body) {
+/** `overrides` replaces the pinned defaults; an `undefined` value unsets one. */
+async function withConfig(windows, body, overrides = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agent-hud-pi-"));
   const configPath = path.join(directory, "config.json");
   await fs.writeFile(configPath, JSON.stringify({ promotions: windows }), "utf8");
-  const previous = {
-    AGENT_HUD_CONFIG: process.env.AGENT_HUD_CONFIG,
+  const pinned = {
+    AGENT_HUD_CONFIG: configPath,
     // Pinned so the shared cache is this test's own, not whatever the
     // developer's ~/.agent-hud last fetched.
-    AGENT_HUD_DATA_DIR: process.env.AGENT_HUD_DATA_DIR,
-    AGENT_HUD_NO_REMOTE: process.env.AGENT_HUD_NO_REMOTE,
+    AGENT_HUD_DATA_DIR: directory,
+    AGENT_HUD_NO_REMOTE: "1",
+    AGENT_HUD_PROMOTIONS_URL: undefined,
+    ...overrides,
   };
-  process.env.AGENT_HUD_CONFIG = configPath;
-  process.env.AGENT_HUD_DATA_DIR = directory;
-  process.env.AGENT_HUD_NO_REMOTE = "1";
+  const previous = Object.fromEntries(
+    Object.keys(pinned).map((key) => [key, process.env[key]]),
+  );
+  for (const [key, value] of Object.entries(pinned)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
   try {
     await body(directory);
   } finally {
@@ -163,13 +170,48 @@ test("switching to a model with no endpoint clears an endpoint-bound segment", a
   });
 });
 
+/**
+ * Polls until `check` holds. A fixed number of ticks is not a wait: a file read
+ * on a loaded CI runner can take longer than any tick count, and the assertion
+ * after it would then judge a state that has not arrived yet. Failing here
+ * names what was missing instead.
+ */
+async function eventually(check, describe, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await check())) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${describe()}`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 /** The status file is read off the turn's critical path, so a repaint lands
  * on a later tick rather than inside `fire`. */
 async function settle(pi, count) {
-  for (let attempt = 0; attempt < 200 && pi.painted.length < count; attempt += 1) {
-    await new Promise((resolve) => setImmediate(resolve));
-  }
+  await eventually(
+    () => pi.painted.length >= count,
+    () => `${count} paints, got ${pi.painted.length}`,
+  );
 }
+
+test("a pi-only user still fetches the shared schedule", async () => {
+  // Nobody else may be running to refresh the cache, so pi schedules the
+  // detached fetch itself. The URL points at a closed local port: the child
+  // fails fast, and the attempt marker written before it starts is the
+  // evidence that it was started at all.
+  const url = "http://127.0.0.1:9/promotions.json";
+  await withConfig([], async (directory) => {
+    const pi = fakePi("https://api.deepseek.com");
+    piExtension(pi.api);
+    pi.fire("session_start");
+    const marker = path.join(directory, "promotions-attempt");
+    await eventually(
+      () => fs.access(marker).then(() => true, () => false),
+      () => `the attempt marker at ${marker}`,
+    );
+    assert.equal((await fs.readFile(marker, "utf8")).split(" ")[1], `${url}\n`);
+    pi.fire("session_shutdown");
+  }, { AGENT_HUD_NO_REMOTE: undefined, AGENT_HUD_PROMOTIONS_URL: url });
+});
 
 test("pi reports the vendor incident for the API its own model calls", async () => {
   await withConfig([], async (directory) => {

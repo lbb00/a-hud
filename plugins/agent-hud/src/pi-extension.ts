@@ -18,6 +18,7 @@ import {
   healthSourceFor,
   healthState,
   spawnHealthRefresh,
+  spawnPromotionsRefresh,
 } from "@agent-hud/provider";
 import { healthSeverity } from "./design.js";
 import { incidentText, promotionText } from "./render.js";
@@ -122,6 +123,10 @@ export default function (pi: PiExtensionApi): void {
     // repainted only if the model has not changed underneath the read.
     void (async () => {
       try {
+        // The shared schedule is fetched by a detached child, never in a
+        // repaint, and pi may be the only host running: without this a pi-only
+        // user would keep the copy bundled at publish time forever.
+        await spawnPromotionsRefresh(CLI_PATH);
         await readHealth(endpoint);
       } catch {
         // A footer segment is never worth failing a turn over.

@@ -10,6 +10,7 @@ import {
   remoteFetchDisabled,
   SHARED_PROMOTIONS_URL,
   sharedPromotionsUrl,
+  spawnPromotionsRefresh,
 } from "../dist/index.js";
 
 const FETCHED_AT = 1_772_000_000;
@@ -200,6 +201,23 @@ test("AGENT_HUD_NO_REMOTE stops the request and the staleness that triggers it",
   assert.equal(called, false);
   assert.equal(remoteFetchDisabled(offline), true);
   assert.equal(promotionSources(offline).sharedStale, false);
+});
+
+test("switching the schedule URL fetches at once, not after the old URL's cooldown", async () => {
+  // The refresh child is stood in for by an empty module, so only the attempt
+  // marker the spawn leaves behind is under test.
+  const { directory, env } = await workspace({ "noop.mjs": "" });
+  const noop = path.join(directory, "noop.mjs");
+  const first = { ...env, AGENT_HUD_PROMOTIONS_URL: "https://example.test/first.json" };
+  assert.equal(await spawnPromotionsRefresh(noop, first), true);
+  assert.equal(promotionSources(first).sharedStale, false);
+
+  const second = { ...env, AGENT_HUD_PROMOTIONS_URL: "https://example.test/second.json" };
+  assert.equal(promotionSources(second).sharedStale, true);
+  assert.equal(await spawnPromotionsRefresh(noop, second), true);
+  assert.equal(promotionSources(second).sharedStale, false);
+  // The marker now belongs to the second URL, so the first is due again too.
+  assert.equal(promotionSources(first).sharedStale, true);
 });
 
 test("a cache fetched from another URL is not an answer for this one", async () => {
