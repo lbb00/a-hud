@@ -255,12 +255,19 @@ test("a campaign longer than the scan reaches its real last day", () => {
     utcSeconds(2026, 9, 12, 0, 0),
   );
 
-  // No `until` and no pause: reported as open for the next year rather than
-  // as an infinite instant, which would leave nothing to render.
+  // An `until` years out is still the real end, not some cap along the way.
+  const years = { ...campaign, until: "2028-09-30" };
+  assert.equal(
+    resolvePromotion([years], { now }).changesAt,
+    utcSeconds(2028, 10, 1, 0, 0),
+  );
+
+  // No `until` and no pause: there is no end to count down to, and reporting
+  // any date would be inventing one.
   const endless = { ...campaign, until: undefined };
-  const openUntil = resolvePromotion([endless], { now }).changesAt;
-  assert.ok(Number.isFinite(openUntil));
-  assert.ok(openUntil - now >= 365 * 86_400, String(openUntil));
+  const open = resolvePromotion([endless], { now });
+  assert.equal(open.active, true);
+  assert.equal(open.changesAt, null);
 });
 
 test("honors weekday, campaign-date and host filters", () => {

@@ -56,6 +56,17 @@ test("shows the label and remaining time while a window is open", () => {
   assert.doesNotMatch(rendered, /↑/);
 });
 
+test("shows only the label for an open window that has no end date", () => {
+  const rendered = line1({ id: "always", label: "50%", active: true, changesAt: null });
+  assert.match(rendered, /%50%(\s|$)/);
+  assert.doesNotMatch(rendered, /%50% \d/);
+  // Only an open window can lack a date; a pending one always has its start.
+  assert.doesNotMatch(
+    line1({ id: "always", label: "50%", active: false, changesAt: null }),
+    /%/,
+  );
+});
+
 test("marks a window that has not opened yet with its countdown", () => {
   assert.match(
     line1({ id: "offpeak", label: "50%", active: false, changesAt: OBSERVED_AT + 7_980 }),

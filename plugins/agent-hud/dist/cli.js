@@ -453,7 +453,6 @@ var CLOCK_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 var DEFAULT_ZONE = "UTC";
 var SCAN_DAYS_BACK = 1;
 var SCAN_DAYS_FORWARD = 8;
-var RUN_CAP_DAYS = 366;
 function clockMinutes(value) {
   if (typeof value !== "string")
     return null;
@@ -554,14 +553,20 @@ function runEnd(occurrences, active, now) {
   if (!bounds)
     return end;
   const base = scanBase(bounds.zone, now);
-  for (let offset = SCAN_DAYS_FORWARD + 1; offset <= RUN_CAP_DAYS; offset += 1) {
-    const next = occurrenceOn(active.window, bounds, base, offset);
-    if (!next || next.startsAt > end)
-      break;
-    if (next.endsAt > end)
-      end = next.endsAt;
-  }
-  return end;
+  const beyond = occurrenceOn(active.window, bounds, base, SCAN_DAYS_FORWARD + 1);
+  if (!beyond || beyond.startsAt > end)
+    return end;
+  const until = civilDate(active.window.until);
+  if (!until)
+    return null;
+  const last = occurrenceOn(active.window, bounds, base, Math.round((until - base) / 864e5));
+  return last ? last.endsAt : end;
+}
+function civilDate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value ?? "");
+  if (!match)
+    return null;
+  return Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
 }
 
 // ../../packages/provider/dist/promotions.js
@@ -2129,8 +2134,9 @@ function promotions(platform, endpoint) {
   for (const window of sources.shared) describe(window, "shared");
   const status = resolvePromotion(windows, { platform, endpoint });
   process.stdout.write(
-    status ? `now: ${status.id} ${status.active ? "active until" : "starts"} ${localTime(status.changesAt)}
-` : "now: no window active or upcoming\n"
+    status === null ? "now: no window active or upcoming\n" : status.changesAt === null ? `now: ${status.id} active, no end date
+` : `now: ${status.id} ${status.active ? "active until" : "starts"} ${localTime(status.changesAt)}
+`
   );
 }
 function sharedSummary(sources) {
@@ -2516,8 +2522,10 @@ function promotionToken(snapshot, colors) {
   return promotion?.active ? paint("green", text, colors) : text;
 }
 function promotionText(promotion, now) {
-  if (!promotion || !isFiniteNumber(promotion.changesAt)) return "";
+  if (!promotion) return "";
   const label = displayText(promotion.label).slice(0, 8);
+  if (promotion.changesAt === null) return promotion.active ? `%${label}` : "";
+  if (!isFiniteNumber(promotion.changesAt)) return "";
   const time = compactDuration(promotion.changesAt - now);
   return `%${label}${label ? " " : ""}${promotion.active ? "" : "\u2191"}${time}`;
 }

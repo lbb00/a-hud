@@ -409,8 +409,10 @@ function promotionToken(snapshot, colors) {
   return promotion?.active ? paint("green", text, colors) : text;
 }
 function promotionText(promotion, now) {
-  if (!promotion || !isFiniteNumber(promotion.changesAt)) return "";
+  if (!promotion) return "";
   const label = displayText(promotion.label).slice(0, 8);
+  if (promotion.changesAt === null) return promotion.active ? `%${label}` : "";
+  if (!isFiniteNumber(promotion.changesAt)) return "";
   const time = compactDuration(promotion.changesAt - now);
   return `%${label}${label ? " " : ""}${promotion.active ? "" : "\u2191"}${time}`;
 }

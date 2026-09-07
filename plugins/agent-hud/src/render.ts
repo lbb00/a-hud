@@ -215,8 +215,13 @@ export function promotionText(
   promotion: HudSnapshot["promotion"],
   now: number,
 ): string {
-  if (!promotion || !isFiniteNumber(promotion.changesAt)) return "";
+  if (!promotion) return "";
   const label = displayText(promotion.label).slice(0, 8);
+  // An open window with no end date shows its label alone: a countdown to a
+  // date that does not exist would be a lie, and hiding the badge would deny
+  // a discount that is in effect.
+  if (promotion.changesAt === null) return promotion.active ? `%${label}` : "";
+  if (!isFiniteNumber(promotion.changesAt)) return "";
   const time = compactDuration(promotion.changesAt - now);
   return `%${label}${label ? " " : ""}${promotion.active ? "" : "↑"}${time}`;
 }

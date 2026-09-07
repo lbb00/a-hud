@@ -27,7 +27,7 @@ statusline, so the original hierarchy remains intact.
 | `*19:04`, `*cold` | Prefix-cache expiry time or expired cache |
 | `#15%/70%` | 5-hour and 7-day quota usage |
 | `↻13:10/Fri19:00` | Reset times in the same order as quota |
-| `%+50% 9d` | Promotional window: green while open, `↑3h` until it opens |
+| `%+50% 9d` | Promotional window: green while open, `↑3h` until it opens, no time when it has no end date |
 | `$5.32` | Client-estimated session cost |
 | `→~3t`, `→full` | Turns until forced compact, or already in the zone |
 | `↓~12t` | Turns until a voluntary compact pays for itself |

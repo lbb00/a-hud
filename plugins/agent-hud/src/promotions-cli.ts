@@ -43,11 +43,13 @@ export function promotions(
 
   const status = resolvePromotion(windows, { platform, endpoint });
   process.stdout.write(
-    status
-      ? `now: ${status.id} ${status.active ? "active until" : "starts"} ${
+    status === null
+      ? "now: no window active or upcoming\n"
+      : status.changesAt === null
+      ? `now: ${status.id} active, no end date\n`
+      : `now: ${status.id} ${status.active ? "active until" : "starts"} ${
         localTime(status.changesAt)
-      }\n`
-      : "now: no window active or upcoming\n",
+      }\n`,
   );
 }
 

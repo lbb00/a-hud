@@ -34,7 +34,7 @@ it now, and where you are.
 | `*19:04` | When the prefix cache expires; `*cold` once it has |
 | `#15%/70%` | Share used of the 5-hour and the 7-day quota |
 | `↻13:10/Fri19:00` | When each of those two quotas resets, in the same order |
-| `%+50% 9d` | Promotional window: green while open, with the time left; `%+50% ↑3h` means it opens in three hours |
+| `%+50% 9d` | Promotional window: green while open, with the time left; `%+50% ↑3h` means it opens in three hours; `%+50%` alone is open with no end date |
 
 **Line two — decision support**
 

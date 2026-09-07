@@ -68,8 +68,10 @@ export interface PromotionStatus {
   label: string;
   /** True when the window is open at the observed time. */
   active: boolean;
-  /** Epoch seconds when an open window closes, or a pending window opens. */
-  changesAt: number;
+  /** Epoch seconds when an open window closes, or a pending window opens.
+   * Null for an open window with no end date, which has nothing to count
+   * down to. */
+  changesAt: number | null;
 }
 
 const CONFIG_FILE_NAME = "config.json";

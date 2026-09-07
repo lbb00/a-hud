@@ -21,10 +21,6 @@ const DEFAULT_ZONE = "UTC";
  * eight days forward always reaches the next occurrence of a weekly schedule. */
 const SCAN_DAYS_BACK = 1;
 const SCAN_DAYS_FORWARD = 8;
-/** How far a run that never pauses is followed. A daily all-day window with no
- * `until` has no end at all; a year out reads as open indefinitely, whereas an
- * infinite instant would make the badge vanish. */
-const RUN_CAP_DAYS = 366;
 
 /** Minutes past midnight, or null for anything that is not an "HH:MM" string. */
 export function clockMinutes(value: unknown): number | null {
@@ -185,15 +181,19 @@ export function occurrencesFor(
  * A campaign that runs around the clock arrives here as one occurrence per day,
  * so reporting the end of today's would tell the reader the badge expires
  * tonight. Occurrences that touch are one run, and the run's end is the answer.
- * The scan stops eight days out, which is no answer for a month-long campaign,
- * so a run still open at the horizon is followed day by day until it pauses,
- * its `until` passes, or the cap is reached.
+ *
+ * The scan stops eight days out, which is no answer for a month-long campaign.
+ * A run still open past the horizon can only be a window whose end equals its
+ * start, since any other shape leaves a gap between one day and the next, and
+ * such a window is open every day it is allowed on: its run ends with its last
+ * allowed day, `until`, and with no `until` it has no end at all. That case is
+ * null, never a date, because any date would be an invention.
  */
 export function runEnd(
   occurrences: Occurrence[],
   active: Occurrence,
   now: number,
-): number {
+): number | null {
   let end = active.endsAt;
   // Occurrences come out in ascending order, so one pass chains the whole run.
   for (const occurrence of occurrences) {
@@ -202,10 +202,24 @@ export function runEnd(
   const bounds = windowBounds(active.window);
   if (!bounds) return end;
   const base = scanBase(bounds.zone, now);
-  for (let offset = SCAN_DAYS_FORWARD + 1; offset <= RUN_CAP_DAYS; offset += 1) {
-    const next = occurrenceOn(active.window, bounds, base, offset);
-    if (!next || next.startsAt > end) break;
-    if (next.endsAt > end) end = next.endsAt;
-  }
-  return end;
+  // The scan covers every weekday, so a run that reaches the day past the
+  // horizon has no `days` gap to run into; only `until` can still stop it.
+  const beyond = occurrenceOn(active.window, bounds, base, SCAN_DAYS_FORWARD + 1);
+  if (!beyond || beyond.startsAt > end) return end;
+  const until = civilDate(active.window.until);
+  if (!until) return null;
+  const last = occurrenceOn(
+    active.window,
+    bounds,
+    base,
+    Math.round((until - base) / 86_400_000),
+  );
+  return last ? last.endsAt : end;
+}
+
+/** Midnight UTC of a "YYYY-MM-DD" bound, or null for anything else. */
+function civilDate(value: string | undefined): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value ?? "");
+  if (!match) return null;
+  return Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
 }
