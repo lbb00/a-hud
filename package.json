@@ -14,7 +14,7 @@
   },
   "packageManager": "npm@11.16.0",
   "allowScripts": {
-    "esbuild@0.25.12": true
+    "esbuild@0.28.2": true
   },
   "scripts": {
     "build": "npm run build --workspace agent-hud",
@@ -30,7 +30,7 @@
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
-    "publint": "^0.3.22",
-    "oxlint": "^1.76.0"
+    "publint": "^0.3.24",
+    "oxlint": "^1.83.0"
   }
 }
