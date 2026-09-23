@@ -32,7 +32,7 @@
     "check": "npm run build && node --test"
   },
   "devDependencies": {
-    "@types/node": "^24.10.1",
+    "@types/node": "^26.6.2",
     "typescript": "^7.0.2"
   },
   "engines": {
