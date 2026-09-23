@@ -83,7 +83,7 @@ test("ships open-source governance, secure CI, and reviewed install scripts", as
   assert.match(ci, /Published runtime \/ Node 18/u);
   assert.doesNotMatch(ci, /uses: [^@\n]+@v\d+/u);
   assert.match(ci, /actions\/checkout@[a-f\d]{40} # v7\.0\.1/u);
-  assert.match(ci, /actions\/setup-node@[a-f\d]{40} # v6\.5\.0/u);
+  assert.match(ci, /actions\/setup-node@[a-f\d]{40} # v7\.0\.0/u);
 });
 
 test("ships TypeScript source as an ESM package with a compiled CLI", async () => {
