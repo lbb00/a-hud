@@ -24,7 +24,7 @@ test("wires Oxlint into the workspace quality gate", async () => {
   assert.match(manifest.scripts["release:check"], /npm run package:lint/);
   assert.match(manifest.scripts["package:lint"], /publint/u);
   assert.match(manifest.scripts["package:lint"], /attw/u);
-  assert.equal(manifest.devDependencies.publint, "^0.3.22");
+  assert.equal(manifest.devDependencies.publint, "^0.3.24");
   assert.equal(manifest.devDependencies["@arethetypeswrong/cli"], "^0.18.5");
   assert.match(manifest.devDependencies.oxlint, /^\^1\./);
   assert.equal(manifest.engines.node, "^20.19.0 || >=22.12.0");
@@ -67,14 +67,14 @@ test("ships open-source governance, secure CI, and reviewed install scripts", as
   assert.equal(manifest.license, "MIT");
   assert.equal(pluginManifest.license, "MIT");
   assert.equal(providerManifest.license, "MIT");
-  assert.equal(manifest.allowScripts["esbuild@0.25.12"], true);
+  assert.deepEqual(manifest.allowScripts, { "esbuild@0.28.2": true });
   assert.equal(pluginManifest.files.includes("test"), false);
   assert.equal(pluginManifest.files.includes("src"), false);
   assert.ok(pluginManifest.files.includes("dist"));
   assert.ok(pluginManifest.files.includes("LICENSE"));
   assert.ok(pluginManifest.files.includes("README.zh-CN.md"));
   assert.deepEqual(pluginManifest.dependencies, undefined);
-  assert.equal(pluginManifest.devDependencies["get-east-asian-width"], "^1.6.0");
+  assert.equal(pluginManifest.devDependencies["get-east-asian-width"], "^1.7.0");
   assert.ok(providerManifest.files.includes("LICENSE"));
   assert.ok(providerManifest.files.includes("README.zh-CN.md"));
   assert.match(ci, /^permissions:\n  contents: read$/mu);
