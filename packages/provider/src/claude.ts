@@ -29,8 +29,13 @@ export function normalizeClaudeStatus(
   const cwd = safePath(input.workspace?.current_dir || input.cwd) || state.cwd;
   const limits: UsageLimit[] = [];
   const resets: UsageReset[] = [];
-  const five = input.rate_limits?.five_hour;
-  const seven = input.rate_limits?.seven_day;
+  // Claude Code drops a window from rate_limits once its reset time passes and
+  // only brings it back after the next API response. A dropped window has
+  // rolled over, so it reads 0% with no known reset; leaving it out would let
+  // the 7d figure take the 5h slot.
+  const reported = input.rate_limits?.five_hour || input.rate_limits?.seven_day;
+  const five = input.rate_limits?.five_hour || (reported ? { used_percentage: 0 } : undefined);
+  const seven = input.rate_limits?.seven_day || (reported ? { used_percentage: 0 } : undefined);
 
   if (finite(five?.used_percentage)) {
     limits.push({

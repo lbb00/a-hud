@@ -461,6 +461,28 @@ function quotaSeverity(snapshot, now = snapshot.observedAt) {
   }
   return severity;
 }
+var IMPLICIT_QUOTA_LABELS = /* @__PURE__ */ new Set(["5h", "7d", "1d"]);
+function quotaTone(percent) {
+  return toneFor(
+    Math.floor(percent),
+    HUD_DESIGN.warning.quotaUsage.yellow,
+    HUD_DESIGN.warning.quotaUsage.red
+  );
+}
+function renderQuota(snapshot, colors) {
+  const { limits } = snapshot;
+  const implicit = limits.every((limit) => IMPLICIT_QUOTA_LABELS.has(limit.label));
+  if (implicit) {
+    const text = `#${limits.map((limit) => `${Math.floor(limit.percent)}%`).join("/")}`;
+    return signal(text, severityTone(quotaSeverity(snapshot)), colors);
+  }
+  const parts = limits.map((limit) => signal(
+    `${Math.floor(limit.percent)}%`,
+    quotaTone(limit.percent),
+    colors
+  ));
+  return `#${parts.join("/")}`;
+}
 function renderSnapshot(snapshot, options = {}) {
   const colors = options.colors ?? !process.env.NO_COLOR;
   const columns = options.width || Number(process.env.COLUMNS) || 0;
@@ -502,8 +524,7 @@ function renderSnapshot(snapshot, options = {}) {
     }
   }
   if (snapshot.limits.length) {
-    const quota = snapshot.limits.map((limit) => `${Math.floor(limit.percent)}%`).join("/");
-    line1.push(signal(`#${quota}`, severityTone(quotaSeverity(snapshot)), colors));
+    line1.push(renderQuota(snapshot, colors));
   }
   const resets = (snapshot.resets || []).map((reset) => formatReset(reset.resetAt, reset.label === "7d")).filter(Boolean);
   if (resets.length) {

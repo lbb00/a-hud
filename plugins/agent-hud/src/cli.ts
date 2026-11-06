@@ -14,6 +14,9 @@ import {
   normalizeAntigravityStatus,
   normalizeClaudeStatus,
   normalizeCursorStatus,
+  readCursorPlanUsage,
+  refreshCursorPlanUsage,
+  spawnCursorUsageRefresh,
   readJsonStdin,
   recordHook,
   refreshHealth,
@@ -119,8 +122,10 @@ async function statusline(): Promise<void> {
   }
   if (isCursor) {
     const host = input as CursorStatusInput;
+    const plan = await readCursorPlanUsage();
+    if (plan.stale) await spawnCursorUsageRefresh(CLI_PATH);
     const snapshot = snapshotFromCursor(
-      normalizeCursorStatus(host, state),
+      normalizeCursorStatus(host, state, undefined, plan.usage),
       getGitStatus(cwd),
       currentPromotion({ platform: "cursor" }),
     );
@@ -361,6 +366,15 @@ async function setup(args: string[]): Promise<void> {
   }
 }
 
+async function refreshCursorUsageCommand(args: string[]): Promise<void> {
+  const lockPath = valueAfter(args, "--refresh-lock");
+  const lockToken = valueAfter(args, "--refresh-token");
+  await refreshCursorPlanUsage({
+    home: valueAfter(args, "--home") || undefined,
+    lease: lockPath && lockToken ? { path: lockPath, token: lockToken } : undefined,
+  });
+}
+
 async function refreshHealthCommand(args: string[]): Promise<void> {
   // Only an identifier crosses the process boundary; the address to fetch is
   // resolved from the registry compiled into this build.
@@ -416,6 +430,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     return promotions(hookPlatform(args), valueAfter(args, "--endpoint") ?? undefined);
   }
   if (command === "refresh-health") return refreshHealthCommand(args);
+  if (command === "refresh-cursor-usage") return refreshCursorUsageCommand(args);
   if (command === "refresh-promotions") {
     await refreshSharedPromotions();
     return;

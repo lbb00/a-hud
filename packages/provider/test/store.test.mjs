@@ -303,7 +303,7 @@ test("keeps a Stop working only while a reported background task is running", ()
   assert.equal(completed.status, "idle");
 });
 
-test("running tools and subagents beat Stop, but not a later SessionEnd", () => {
+test("Stop ends open tools; running subagents beat Stop, but not a later SessionEnd", () => {
   const base = {
     v: 1,
     sessionId: "precedence",
@@ -329,7 +329,20 @@ test("running tools and subagents beat Stop, but not a later SessionEnd", () => 
     { ...base, at: 1_200, type: "Stop", backgroundTasksRunning: false },
   ];
 
-  assert.equal(foldEvents(activeEvents, 2_000).status, "working");
+  // A tool left open at Stop lost its PostToolUse; the subagent can outlive
+  // the turn and keeps the session working.
+  const stopped = foldEvents(activeEvents, 2_000);
+  assert.equal(stopped.status, "working");
+  assert.deepEqual(stopped.tools, []);
+  assert.deepEqual(stopped.agents.map((agent) => agent.id), ["agent_1"]);
+  const toolOnly = foldEvents([activeEvents[0], activeEvents[2]], 2_000);
+  assert.equal(toolOnly.status, "idle");
+  assert.deepEqual(toolOnly.tools, []);
+  const nextTurn = foldEvents([
+    ...activeEvents,
+    { ...base, at: 1_300, type: "PreToolUse", tool: { id: "tool_2", name: "Read", status: "running" } },
+  ], 2_000);
+  assert.deepEqual(nextTurn.tools.map((tool) => tool.id), ["tool_2"]);
   const ended = foldEvents([
     ...activeEvents,
     { ...base, at: 1_300, type: "SessionEnd" },

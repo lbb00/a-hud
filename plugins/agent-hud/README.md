@@ -29,8 +29,8 @@ collection, state, rendering, colors, and configuration while respecting each
 host's actual payload:
 
 - Claude Code: the full custom renderer inside the native statusline.
-- Cursor CLI: the same custom renderer and native lifecycle hooks. Cursor does
-  not currently expose quota in its status payload, so quota is omitted.
+- Cursor CLI: the same custom renderer and native lifecycle hooks. Auto and API
+  plan usage come from a cached account read and stay hidden until that cache exists.
 - Antigravity CLI: the same custom renderer plus native quota, VCS, lifecycle
   and background-task facts.
 - Codex: the native footer for model/context/limits/git/progress, plus an

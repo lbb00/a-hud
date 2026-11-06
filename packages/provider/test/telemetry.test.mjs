@@ -119,24 +119,11 @@ test("only registered API hosts resolve to a status source", () => {
 });
 
 test("preserves the legacy effort fallback order including object forms", () => {
-  assert.equal(extractEffort({
-    effort: { effort: "max" },
-    model: { effort: "high" },
-    reasoning_effort: "medium",
-  }), "max");
-  assert.equal(extractEffort({
-    model: { effort: { level: "xhigh" } },
-    reasoning_effort: "medium",
-  }), "xhigh");
-  assert.equal(extractEffort({
-    output_style: { effort: { effort: "low" } },
-  }), "low");
-  assert.equal(extractEffort({
-    effort: "\u001b]2;PWNED\u0007",
-  }), "");
-  assert.equal(extractEffort({
-    effort: { level: "\u001b]2;PWNED\u0007", effort: "ultra" },
-  }), "");
+  assert.equal(extractEffort({ effort: { effort: "max" }, model: { effort: "high" }, reasoning_effort: "medium" }), "max");
+  assert.equal(extractEffort({ model: { effort: { level: "xhigh" } }, reasoning_effort: "medium" }), "xhigh");
+  assert.equal(extractEffort({ output_style: { effort: { effort: "low" } } }), "low");
+  assert.equal(extractEffort({ effort: "\u001b]2;PWNED\u0007" }), "");
+  assert.equal(extractEffort({ effort: { level: "\u001b]2;PWNED\u0007", effort: "ultra" } }), "");
 });
 
 test("rejects terminal control and unknown effort values from project settings", async (t) => {
@@ -162,11 +149,7 @@ test("computes context from native percentage or token components", () => {
   assert.equal(contextPercent({
     context_window: {
       context_window_size: 200_000,
-      current_usage: {
-        input_tokens: 20_000,
-        cache_creation_input_tokens: 10_000,
-        cache_read_input_tokens: 10_000,
-      },
+      current_usage: { input_tokens: 20_000, cache_creation_input_tokens: 10_000, cache_read_input_tokens: 10_000 },
     },
   }), 20);
 });
@@ -253,16 +236,9 @@ test("an oversized status body is refused instead of parsed", async (t) => {
 test("metric write failures degrade to partial facts instead of rejecting", async () => {
   const result = await deriveClaudeTelemetry({
     session_id: "read-only",
-    context_window: {
-      used_percentage: 50,
-      total_input_tokens: 100_000,
-    },
+    context_window: { used_percentage: 50, total_input_tokens: 100_000 },
     cost: { total_cost_usd: 2 },
-  }, {
-    home: "/dev/null",
-    now: 2_000_000_000,
-    writeLogs: true,
-  });
+  }, { home: "/dev/null", now: 2_000_000_000, writeLogs: true });
   assert.equal(result.turns, 0);
   assert.equal(result.compact.breakEvenTurns, 14);
 });
@@ -296,40 +272,20 @@ test("ignores non-string session ids instead of failing the statusline", async (
   t.after(() => fs.rm(home, { recursive: true, force: true }));
   const result = await deriveClaudeTelemetry({
     session_id: { malformed: true },
-    context_window: {
-      used_percentage: 50,
-      total_input_tokens: 100_000,
-    },
+    context_window: { used_percentage: 50, total_input_tokens: 100_000 },
     cost: { total_cost_usd: 2 },
-  }, {
-    home,
-    now: 2_000_000_000,
-    writeLogs: true,
-  });
+  }, { home, now: 2_000_000_000, writeLogs: true });
 
   assert.equal(result.turns, 0);
-  await assert.rejects(
-    fs.stat(path.join(home, ".claude", "context-log")),
-    { code: "ENOENT" },
-  );
-  await assert.rejects(
-    fs.stat(path.join(home, ".claude", "cost-log")),
-    { code: "ENOENT" },
-  );
+  await assert.rejects(fs.stat(path.join(home, ".claude", "context-log")), { code: "ENOENT" });
+  await assert.rejects(fs.stat(path.join(home, ".claude", "cost-log")), { code: "ENOENT" });
 });
 
 test("matches shell behavior by requiring a rising segment before showing full", async () => {
   const result = await deriveClaudeTelemetry({
     session_id: "already-full",
-    context_window: {
-      used_percentage: 82,
-      total_input_tokens: 120_000,
-    },
-  }, {
-    home: "/dev/null",
-    now: 2_000_000_000,
-    writeLogs: false,
-  });
+    context_window: { used_percentage: 82, total_input_tokens: 120_000 },
+  }, { home: "/dev/null", now: 2_000_000_000, writeLogs: false });
   assert.equal(result.compact.inForcedZone, false);
   assert.equal(result.compact.forcedTurns, null);
   assert.equal(result.compact.breakEvenTurns, 11);
@@ -477,4 +433,62 @@ test("transcript maintenance repairs cache permissions and removes stale entries
     (await fs.stat(path.join(cacheDir, cacheNames[0]))).mode & 0o777,
     0o600,
   );
+});
+
+test("calculates cache expiration from message timestamp and ignores filesystem mtime drift", async (t) => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "agent-hud-mtime-drift-"));
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  const transcript = path.join(home, "session.jsonl");
+
+  const now = 2_000_000_000;
+  const msgTime = now - 500;
+  const msgTimestamp = new Date(msgTime * 1_000).toISOString();
+  const sidechainTimestamp = new Date((now + 5_000) * 1_000).toISOString();
+
+  await fs.writeFile(transcript, [
+    JSON.stringify({ type: "assistant", timestamp: msgTimestamp, message: { id: "msg_1", usage: { cache_creation_input_tokens: 1 } } }),
+    JSON.stringify({ type: "assistant", isSidechain: true, timestamp: sidechainTimestamp, message: { id: "msg_side" } }),
+  ].join("\n") + "\n");
+
+  await fs.utimes(transcript, now + 1_000, now + 1_000);
+
+  const input = { transcript_path: transcript };
+  const first = await deriveClaudeTelemetry(input, { home, now, writeLogs: false });
+
+  assert.equal(first.turns, 1);
+  assert.deepEqual(first.cache, {
+    expiresAt: msgTime + 300,
+    ttlSeconds: 300,
+  });
+
+  await fs.utimes(transcript, now + 2_000, now + 2_000);
+  const second = await deriveClaudeTelemetry(input, { home, now, writeLogs: false });
+  assert.equal(second.turns, 1);
+  assert.deepEqual(second.cache, {
+    expiresAt: msgTime + 300,
+    ttlSeconds: 300,
+  });
+
+  const msgTime2 = now - 200;
+  await fs.appendFile(transcript, `${JSON.stringify({
+    type: "assistant",
+    timestamp: new Date(msgTime2 * 1_000).toISOString(),
+    message: { id: "msg_2", usage: {} },
+  })}\n`);
+  await fs.utimes(transcript, now + 3_000, now + 3_000);
+  const third = await deriveClaudeTelemetry(input, { home, now, writeLogs: false });
+  assert.equal(third.turns, 2);
+  assert.deepEqual(third.cache, {
+    expiresAt: msgTime2 + 300,
+    ttlSeconds: 300,
+  });
+
+  const cacheDir = path.join(home, ".agent-hud", "transcript-cache");
+  const [cacheName] = (await fs.readdir(cacheDir)).filter((n) => /^[a-f0-9]{24}\.json$/.test(n));
+  const rawCache = JSON.parse(await fs.readFile(path.join(cacheDir, cacheName), "utf8"));
+  delete rawCache.latestTimestampSeconds;
+  await fs.writeFile(path.join(cacheDir, cacheName), JSON.stringify(rawCache));
+  const fourth = await deriveClaudeTelemetry(input, { home, now, writeLogs: false });
+  assert.equal(fourth.turns, 2);
+  assert.equal(fourth.cache?.ttlSeconds, 300);
 });

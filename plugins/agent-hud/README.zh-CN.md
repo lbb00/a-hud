@@ -23,7 +23,7 @@ UI 契约继承已有 shell HUD：颜色只表达风险，亮度负责层级；�
 各宿主只展示自身真实提供的数据：
 
 - Claude Code：在原生 statusline 中运行完整三行 renderer。
-- Cursor CLI：使用相同 renderer 和原生生命周期 hooks；没有额度数据时直接省略。
+- Cursor CLI：使用相同 renderer 和原生生命周期 hooks。Auto 和 API 用量来自缓存的账号读取，缓存为空时省略。
 - Antigravity CLI：使用相同 renderer，并接入原生额度、VCS、生命周期和后台任务事实。
 - Codex：原生 footer 展示模型、上下文、额度、Git 和进度；可选 companion 展示工具、
   子代理和计划活动。

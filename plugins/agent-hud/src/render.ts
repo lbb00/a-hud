@@ -290,6 +290,34 @@ function quotaSeverity(snapshot: HudSnapshot, now = snapshot.observedAt): Severi
   return severity;
 }
 
+
+const IMPLICIT_QUOTA_LABELS = new Set(["5h", "7d", "1d"]);
+
+function quotaTone(percent: number): WarningTone | null {
+  return toneFor(
+    Math.floor(percent),
+    HUD_DESIGN.warning.quotaUsage.yellow,
+    HUD_DESIGN.warning.quotaUsage.red,
+  );
+}
+
+function renderQuota(snapshot: HudSnapshot, colors: boolean): string {
+  const { limits } = snapshot;
+  const implicit = limits.every((limit) => IMPLICIT_QUOTA_LABELS.has(limit.label));
+  if (implicit) {
+    const text = `#${limits.map((limit) => `${Math.floor(limit.percent)}%`).join("/")}`;
+    return signal(text, severityTone(quotaSeverity(snapshot)), colors);
+  }
+  // Each pool keeps its own warning color. A full API pool must not paint a
+  // healthy Auto figure red, and the labels stay off the line.
+  const parts = limits.map((limit) => signal(
+    `${Math.floor(limit.percent)}%`,
+    quotaTone(limit.percent),
+    colors,
+  ));
+  return `#${parts.join("/")}`;
+}
+
 export function renderSnapshot(
   snapshot: HudSnapshot,
   options: { colors?: boolean; width?: number; activity?: boolean } = {},
@@ -347,8 +375,7 @@ export function renderSnapshot(
   }
 
   if (snapshot.limits.length) {
-    const quota = snapshot.limits.map((limit) => `${Math.floor(limit.percent)}%`).join("/");
-    line1.push(signal(`#${quota}`, severityTone(quotaSeverity(snapshot)), colors));
+    line1.push(renderQuota(snapshot, colors));
   }
   const resets = (snapshot.resets || [])
     .map((reset) => formatReset(reset.resetAt, reset.label === "7d"))
