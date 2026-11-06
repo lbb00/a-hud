@@ -524,7 +524,8 @@ var PROVIDER_DEFAULTS = {
   compactTargetPercent: 80,
   compactSummaryTokens: 17e3,
   recentContextRows: 6,
-  apiHealthTtlSeconds: 300
+  apiHealthTtlSeconds: 300,
+  cursorUsageTtlSeconds: 60
 };
 
 // ../../packages/provider/dist/telemetry/health.js

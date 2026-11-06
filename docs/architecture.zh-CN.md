@@ -42,8 +42,7 @@ R”，但不能决定“显示黄色”“优先展示哪个建议”或“窄�
 - `setup.ts` 适配各宿主的配置表面；
 - `cli.ts` 组合两层并生成自包含运行入口。
 
-Claude Code、Cursor 和 Antigravity 支持完整三行 renderer。Cursor 没有额度事实时
-省略额度；Antigravity 使用原生额度、VCS、生命周期和后台任务事实。Codex 只允许
+Claude Code、Cursor 和 Antigravity 支持完整三行 renderer。Cursor 展示缓存的 Auto 和 API 用量，缓存为空时省略；Antigravity 使用原生额度、VCS、生命周期和后台任务事实。Codex 只允许
 预定义 footer 字段，因此使用相同层级组织原生 footer，并省略不可用的 5h 字段。
 工具、子代理和计划活动由可选 companion 展示。
 

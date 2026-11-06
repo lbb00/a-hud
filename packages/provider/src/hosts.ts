@@ -1,3 +1,4 @@
+import type { CursorPlanUsage } from "./cursor-usage.js";
 import type {
   AntigravityStatusInput,
   CursorStatusInput,
@@ -73,18 +74,33 @@ function sharedFacts(
   };
 }
 
+function cursorPlanLimits(usage: CursorPlanUsage | null): UsageLimit[] {
+  if (!usage) return [];
+  const limits: UsageLimit[] = [];
+  for (const [label, percent] of [
+    ["auto", usage.autoPercent],
+    ["api", usage.apiPercent],
+  ] as const) {
+    if (percent == null) continue;
+    limits.push({ label, percent });
+  }
+  return limits;
+}
+
 /**
- * Cursor mirrors Claude's core status field names, but not its transcript or
- * quota APIs. Normalize only Cursor's live payload and shared hook state.
+ * Cursor's live status payload carries context, not the account's Auto and
+ * API pools. Those percents arrive from a cached account read. An empty cache
+ * leaves the pools out; a missing pool is not reported as zero.
  */
 export function normalizeCursorStatus(
   input: CursorStatusInput,
   state: ProviderState,
   observedAt = Math.floor(Date.now() / 1_000),
+  usage: CursorPlanUsage | null = null,
 ): HostSessionFacts {
   return {
     ...sharedFacts("cursor", input, state, observedAt),
-    limits: [],
+    limits: cursorPlanLimits(usage),
     resets: [],
     git: null,
     status: state.status,

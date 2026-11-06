@@ -44,6 +44,19 @@ test("normalizes Cursor's documented live status fields without invented quota",
   assert.deepEqual(facts.resets, []);
 });
 
+test("maps a cached Cursor plan onto auto and api limits without inventing a missing pool", () => {
+  const facts = normalizeCursorStatus({
+    cwd: "/cursor",
+    model: { display_name: "Grok 4.7" },
+  }, { ...state, platform: "cursor" }, 1_000, {
+    autoPercent: 0.71,
+    apiPercent: null,
+  });
+
+  assert.deepEqual(facts.limits, [{ label: "auto", percent: 0.71 }]);
+  assert.deepEqual(facts.resets, []);
+});
+
 test("normalizes Antigravity quota, VCS and live lifecycle", () => {
   const facts = normalizeAntigravityStatus({
     product: "antigravity",

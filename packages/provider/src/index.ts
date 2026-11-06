@@ -37,6 +37,13 @@ export {
   normalizeCursorStatus,
 } from "./hosts.js";
 export {
+  cursorPlanUsageFromBody,
+  readCursorPlanUsage,
+  refreshCursorPlanUsage,
+  spawnCursorUsageRefresh,
+} from "./cursor-usage.js";
+export type { CursorPlanUsage } from "./cursor-usage.js";
+export {
   foldEvents,
   loadState,
   normalizeHookEvent,

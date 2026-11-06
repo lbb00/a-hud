@@ -10,4 +10,5 @@ export const PROVIDER_DEFAULTS = {
   compactSummaryTokens: 17_000,
   recentContextRows: 6,
   apiHealthTtlSeconds: 300,
+  cursorUsageTtlSeconds: 60,
 } as const;

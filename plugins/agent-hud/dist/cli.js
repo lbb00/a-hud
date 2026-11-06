@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 // src/cli.ts
-import fs8 from "node:fs";
-import path12 from "node:path";
+import fs9 from "node:fs";
+import path13 from "node:path";
 import process2 from "node:process";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 
@@ -832,7 +832,8 @@ var PROVIDER_DEFAULTS = {
   compactTargetPercent: 80,
   compactSummaryTokens: 17e3,
   recentContextRows: 6,
-  apiHealthTtlSeconds: 300
+  apiHealthTtlSeconds: 300,
+  cursorUsageTtlSeconds: 60
 };
 
 // ../../packages/provider/dist/telemetry/health.js
@@ -997,7 +998,7 @@ async function readTranscriptCache(filePath, transcriptPath) {
   try {
     await ensurePrivateFile(filePath);
     const cached = JSON.parse(await fs4.readFile(filePath, "utf8"));
-    if (cached.v !== 2 || cached.transcriptPath !== transcriptPath || !Number.isFinite(cached.turns) || !Number.isFinite(cached.cacheTtlSeconds) || !Number.isFinite(cached.mtimeSeconds) || !Number.isFinite(cached.size) || !Number.isFinite(cached.mtimeMs) || !Array.isArray(cached.ids) || !cached.ids.every((id) => typeof id === "string") || !Array.isArray(cached.recentEvidence) || !cached.recentEvidence.every((item) => item === 0 || item === 1 || item === 2) || cached.endedWithNewline !== true || !Number.isFinite(cached.device) || !Number.isFinite(cached.inode) || typeof cached.tailDigest !== "string")
+    if (cached.v !== 2 || cached.transcriptPath !== transcriptPath || !Number.isFinite(cached.turns) || !Number.isFinite(cached.cacheTtlSeconds) || !Number.isFinite(cached.mtimeSeconds) || !Number.isFinite(cached.size) || !Number.isFinite(cached.mtimeMs) || !Array.isArray(cached.ids) || !cached.ids.every((id) => typeof id === "string") || !Array.isArray(cached.recentEvidence) || !cached.recentEvidence.every((item) => item === 0 || item === 1 || item === 2) || cached.endedWithNewline !== true || !Number.isFinite(cached.device) || !Number.isFinite(cached.inode) || typeof cached.tailDigest !== "string" || cached.latestTimestampSeconds !== void 0 && !Number.isFinite(cached.latestTimestampSeconds))
       return null;
     return cached;
   } catch {
@@ -1035,7 +1036,8 @@ async function readTranscriptFacts(transcriptPath, home) {
       const unchanged = {
         turns: cached.turns,
         cacheTtlSeconds: cached.cacheTtlSeconds,
-        mtimeSeconds: cached.mtimeSeconds
+        mtimeSeconds: cached.mtimeSeconds,
+        ...cached.latestTimestampSeconds && cached.latestTimestampSeconds > 0 ? { latestTimestampSeconds: cached.latestTimestampSeconds } : {}
       };
       await maintainCache();
       return unchanged;
@@ -1043,6 +1045,7 @@ async function readTranscriptFacts(transcriptPath, home) {
     const appendCache = cached && cached.size < stat.size && cached.device === stat.dev && cached.inode === stat.ino && await tailDigest(transcriptPath, cached.size) === cached.tailDigest ? cached : null;
     const scanStart = appendCache?.size ?? 0;
     const ids = new Set(appendCache?.ids ?? []);
+    let latestTimestampSeconds = appendCache?.latestTimestampSeconds ?? 0;
     const evidenceCapacity = 600;
     const recentEvidence = Array.from({ length: evidenceCapacity }, () => 0);
     let recentCount = 0;
@@ -1052,6 +1055,7 @@ async function readTranscriptFacts(transcriptPath, home) {
     }
     let overlap = "";
     let lineIds = /* @__PURE__ */ new Set();
+    let lineTimestampSeconds = 0;
     let lineIsSidechain = false;
     let lineIsAssistant = false;
     let lineHasMessageObject = false;
@@ -1079,12 +1083,21 @@ async function readTranscriptFacts(transcriptPath, home) {
           lineSawOneHourWrite = true;
         }
       }
+      for (const match of scan.matchAll(/"timestamp"\s*:\s*"([^"]+)"/g)) {
+        const parsed = Math.floor(Date.parse(match[1]) / 1e3);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          lineTimestampSeconds = Math.max(lineTimestampSeconds, parsed);
+        }
+      }
       overlap = scan.slice(-256);
     };
     const finishLine = () => {
       if (!lineIsSidechain) {
         for (const id of lineIds)
           ids.add(id);
+        if (lineTimestampSeconds > 0) {
+          latestTimestampSeconds = Math.max(latestTimestampSeconds, lineTimestampSeconds);
+        }
       }
       const lineHasCacheWrite = lineIsAssistant && lineHasMessageObject && lineHasUsageObject && lineSawCacheWrite;
       const lineHasOneHourWrite = lineHasCacheWrite && lineSawOneHourWrite;
@@ -1092,6 +1105,7 @@ async function readTranscriptFacts(transcriptPath, home) {
       recentCount += 1;
       overlap = "";
       lineIds = /* @__PURE__ */ new Set();
+      lineTimestampSeconds = 0;
       lineIsSidechain = false;
       lineIsAssistant = false;
       lineHasMessageObject = false;
@@ -1134,20 +1148,24 @@ async function readTranscriptFacts(transcriptPath, home) {
     }
     const completeIds = [...ids];
     const completeEvidence = orderedEvidence();
+    const completeTimestampSeconds = latestTimestampSeconds;
     if (lineTouched)
       finishLine();
     const evidence = orderedEvidence();
     const cacheTtlSeconds = ttlFor(evidence);
     const after = await fs4.stat(transcriptPath);
+    const mtimeSeconds2 = latestTimestampSeconds > 0 ? latestTimestampSeconds : Math.floor(after.mtimeMs / 1e3);
     const result = {
       turns: ids.size,
       cacheTtlSeconds,
-      mtimeSeconds: Math.floor(after.mtimeMs / 1e3)
+      mtimeSeconds: mtimeSeconds2,
+      ...latestTimestampSeconds > 0 ? { latestTimestampSeconds } : {}
     };
     if (after.size === stat.size && after.mtimeMs === stat.mtimeMs) {
       const cacheSize = endedWithNewline ? after.size : lastCompleteOffset;
       const cacheIds = endedWithNewline ? [...ids] : completeIds;
       const cacheEvidence = endedWithNewline ? evidence : completeEvidence;
+      const cacheTimestamp = endedWithNewline ? latestTimestampSeconds : completeTimestampSeconds;
       await writeTranscriptCache(cachePath, {
         v: 2,
         transcriptPath,
@@ -1162,7 +1180,8 @@ async function readTranscriptFacts(transcriptPath, home) {
         scanStart,
         turns: cacheIds.length,
         cacheTtlSeconds: ttlFor(cacheEvidence),
-        mtimeSeconds: result.mtimeSeconds
+        mtimeSeconds: cacheTimestamp > 0 ? cacheTimestamp : result.mtimeSeconds,
+        latestTimestampSeconds: cacheTimestamp
       });
     }
     await maintainCache();
@@ -1348,8 +1367,9 @@ function normalizeClaudeStatus(input, state, derived) {
   const cwd = safePath(input.workspace?.current_dir || input.cwd) || state.cwd;
   const limits = [];
   const resets = [];
-  const five = input.rate_limits?.five_hour;
-  const seven = input.rate_limits?.seven_day;
+  const reported = input.rate_limits?.five_hour || input.rate_limits?.seven_day;
+  const five = input.rate_limits?.five_hour || (reported ? { used_percentage: 0 } : void 0);
+  const seven = input.rate_limits?.seven_day || (reported ? { used_percentage: 0 } : void 0);
   if (finite(five?.used_percentage)) {
     limits.push({
       label: "5h",
@@ -1442,10 +1462,24 @@ function sharedFacts(platform, input, state, observedAt) {
     plan: state.plan
   };
 }
-function normalizeCursorStatus(input, state, observedAt = Math.floor(Date.now() / 1e3)) {
+function cursorPlanLimits(usage) {
+  if (!usage)
+    return [];
+  const limits = [];
+  for (const [label, percent2] of [
+    ["auto", usage.autoPercent],
+    ["api", usage.apiPercent]
+  ]) {
+    if (percent2 == null)
+      continue;
+    limits.push({ label, percent: percent2 });
+  }
+  return limits;
+}
+function normalizeCursorStatus(input, state, observedAt = Math.floor(Date.now() / 1e3), usage = null) {
   return {
     ...sharedFacts("cursor", input, state, observedAt),
-    limits: [],
+    limits: cursorPlanLimits(usage),
     resets: [],
     git: null,
     status: state.status,
@@ -1509,12 +1543,224 @@ function normalizeAntigravityStatus(input, state, observedAt = Math.floor(Date.n
   };
 }
 
-// ../../packages/provider/dist/store.js
+// ../../packages/provider/dist/cursor-usage.js
+import { spawn as spawn3 } from "node:child_process";
+import { createHash as createHash4, randomUUID as randomUUID3 } from "node:crypto";
 import fs6 from "node:fs/promises";
-import path8 from "node:path";
+import os4 from "node:os";
+import path7 from "node:path";
+var USAGE_URL = "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage";
+var FETCH_TIMEOUT_MS3 = 4e3;
+var MAX_USAGE_BYTES = 64 * 1024;
+var REFRESH_LOCK_STALE_MS = 3e4;
+function percent(value) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0)
+    return null;
+  return Math.min(100, value);
+}
+function accountKey(token) {
+  const payload = token.split(".")[1];
+  let identity = token;
+  if (payload) {
+    try {
+      const json = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+      if (typeof json.sub === "string" && json.sub)
+        identity = json.sub;
+    } catch {
+    }
+  }
+  return createHash4("sha256").update(identity).digest("hex");
+}
+function cursorPlanUsageFromBody(body) {
+  if (!body || typeof body !== "object")
+    return null;
+  const record = body;
+  const plan = record.planUsage;
+  if (!plan || typeof plan !== "object")
+    return null;
+  const planRecord = plan;
+  const autoPercent = percent(planRecord.autoPercentUsed);
+  const apiPercent = percent(planRecord.apiPercentUsed);
+  if (autoPercent == null && apiPercent == null)
+    return null;
+  return { autoPercent, apiPercent };
+}
+function cursorUsageDirectory(env, home) {
+  return path7.join(resolveBaseDir(env, home), "cursor");
+}
+async function currentAccount(env, home) {
+  const token = await readAccessToken(env, home);
+  return token ? accountKey(token) : null;
+}
+async function readCursorPlanUsage(now = Math.floor(Date.now() / 1e3), home = os4.homedir(), env = process.env) {
+  const account = await currentAccount(env, home);
+  const directory = cursorUsageDirectory(env, home);
+  const filePath = path7.join(directory, "plan-usage.json");
+  const attemptPath2 = path7.join(directory, "plan-usage-attempt");
+  let usage = null;
+  let cacheAccount = null;
+  let mtime = 0;
+  try {
+    const parsed = JSON.parse(await fs6.readFile(filePath, "utf8"));
+    cacheAccount = typeof parsed.account === "string" ? parsed.account : null;
+    if (parsed.v === 1 && account && cacheAccount === account) {
+      usage = cursorPlanUsageFromBody({
+        planUsage: {
+          autoPercentUsed: parsed.autoPercent,
+          apiPercentUsed: parsed.apiPercent
+        }
+      });
+    }
+    mtime = Math.floor((await fs6.stat(filePath)).mtimeMs / 1e3);
+  } catch {
+  }
+  try {
+    mtime = Math.max(mtime, Math.floor((await fs6.stat(attemptPath2)).mtimeMs / 1e3));
+  } catch {
+  }
+  if (account && cacheAccount !== account)
+    return { usage: null, stale: true };
+  return {
+    usage,
+    stale: mtime === 0 || now - mtime >= PROVIDER_DEFAULTS.cursorUsageTtlSeconds
+  };
+}
+async function readAccessToken(env, home) {
+  const root = env.CURSOR_CONFIG_DIR || path7.join(home, ".cursor");
+  try {
+    const parsed = JSON.parse(await fs6.readFile(path7.join(root, "auth.json"), "utf8"));
+    return typeof parsed.accessToken === "string" && parsed.accessToken ? parsed.accessToken : null;
+  } catch {
+    return null;
+  }
+}
+async function releaseLease(lease) {
+  try {
+    const before = await fs6.stat(lease.path);
+    if ((await fs6.readFile(lease.path, "utf8")).trim() !== lease.token)
+      return;
+    const after = await fs6.stat(lease.path);
+    if (before.dev !== after.dev || before.ino !== after.ino)
+      return;
+    await fs6.unlink(lease.path);
+  } catch {
+  }
+}
+async function acquireLease(env, home, now = Date.now()) {
+  const directory = cursorUsageDirectory(env, home);
+  const lockPath = path7.join(directory, "plan-usage-refresh.lock");
+  await ensurePrivateDirectory(directory);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const token = randomUUID3();
+    try {
+      const handle = await fs6.open(lockPath, "wx", 384);
+      try {
+        await handle.writeFile(`${token}
+`);
+      } finally {
+        await handle.close();
+      }
+      return { path: lockPath, token };
+    } catch (error) {
+      if (error.code !== "EEXIST")
+        return null;
+      try {
+        const before = await fs6.stat(lockPath);
+        if (now - before.mtimeMs < REFRESH_LOCK_STALE_MS)
+          return null;
+        const after = await fs6.stat(lockPath);
+        if (before.dev !== after.dev || before.ino !== after.ino)
+          return null;
+        await fs6.unlink(lockPath);
+      } catch {
+      }
+    }
+  }
+  return null;
+}
+async function refreshCursorPlanUsage(options = {}) {
+  const home = options.home || os4.homedir();
+  const env = options.env || process.env;
+  const directory = cursorUsageDirectory(env, home);
+  const fetchImpl = options.fetchImpl || fetch;
+  try {
+    await ensurePrivateDirectory(directory);
+    await atomicWritePrivate(path7.join(directory, "plan-usage-attempt"), "\n");
+    const token = await readAccessToken(env, home);
+    if (!token)
+      return;
+    const response = await fetchImpl(USAGE_URL, {
+      method: "POST",
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS3),
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+        "connect-protocol-version": "1"
+      },
+      body: "{}"
+    });
+    if (!response.ok)
+      return;
+    const raw = await response.text();
+    if (Buffer.byteLength(raw, "utf8") > MAX_USAGE_BYTES)
+      return;
+    const usage = cursorPlanUsageFromBody(JSON.parse(raw));
+    if (!usage)
+      return;
+    await atomicWritePrivate(path7.join(directory, "plan-usage.json"), `${JSON.stringify({
+      v: 1,
+      account: accountKey(token),
+      autoPercent: usage.autoPercent,
+      apiPercent: usage.apiPercent
+    })}
+`);
+  } catch {
+  } finally {
+    if (options.lease)
+      await releaseLease(options.lease);
+  }
+}
+async function spawnCursorUsageRefresh(cliPath, home = os4.homedir(), env = process.env) {
+  let lease;
+  try {
+    lease = await acquireLease(env, home);
+  } catch {
+    return false;
+  }
+  if (!lease)
+    return false;
+  try {
+    const child = spawn3(process.execPath, [
+      cliPath,
+      "refresh-cursor-usage",
+      "--home",
+      home,
+      "--refresh-lock",
+      lease.path,
+      "--refresh-token",
+      lease.token
+    ], {
+      detached: true,
+      stdio: "ignore",
+      env
+    });
+    child.once("error", () => {
+      void releaseLease(lease);
+    });
+    child.unref();
+    return true;
+  } catch {
+    await releaseLease(lease);
+    return false;
+  }
+}
+
+// ../../packages/provider/dist/store.js
+import fs7 from "node:fs/promises";
+import path9 from "node:path";
 
 // ../../packages/provider/dist/hooks/normalize.js
-import path7 from "node:path";
+import path8 from "node:path";
 var HOST_EVENT_NAMES = {
   beforeSubmitPrompt: "UserPromptSubmit",
   preToolUse: "PreToolUse",
@@ -1571,7 +1817,7 @@ function toolTarget(name, toolInput) {
     return "";
   const rawPath = toolInput.file_path || toolInput.path || toolInput.workdir || toolInput.cwd || toolInput.TargetFile || toolInput.AbsolutePath || toolInput.DirectoryPath || toolInput.Cwd;
   if (typeof rawPath === "string")
-    return safeText(path7.basename(rawPath), 48);
+    return safeText(path8.basename(rawPath), 48);
   const command = toolInput.command || toolInput.CommandLine;
   if (["Bash", "Shell", "run_command"].includes(name) && typeof command === "string") {
     return safeText(command.trim().split(/\s+/)[0], 32);
@@ -1727,6 +1973,7 @@ function foldEvents(events, now = Date.now()) {
   let lastSessionEndOrder = -1;
   let lastSessionStartOrder = -1;
   let lastWaitingOrder = -1;
+  let lastStopOrder = -1;
   for (const [order, event] of events.entries()) {
     state.platform = event.platform || state.platform;
     state.sessionId = event.sessionId || state.sessionId;
@@ -1746,6 +1993,7 @@ function foldEvents(events, now = Date.now()) {
     }
     if (event.type === "Stop") {
       state.status = event.backgroundTasksRunning ? "working" : "idle";
+      lastStopOrder = order;
     }
     if (event.type === "SessionEnd") {
       state.status = "idle";
@@ -1784,7 +2032,7 @@ function foldEvents(events, now = Date.now()) {
     if (event.plan)
       state.plan = event.plan;
   }
-  const visibleTools = [...tools.values()].filter(({ activity, order }) => !(activity.status === "running" && (order < lastSessionStartOrder || order <= lastSessionEndOrder)) && (activity.status === "running" || now - (activity.updatedAt ?? 0) <= RECENT_TTL_MS)).sort((a, b) => (b.activity.updatedAt ?? 0) - (a.activity.updatedAt ?? 0));
+  const visibleTools = [...tools.values()].filter(({ activity, order }) => !(activity.status === "running" && (order < lastSessionStartOrder || order <= lastSessionEndOrder || order < lastStopOrder)) && (activity.status === "running" || now - (activity.updatedAt ?? 0) <= RECENT_TTL_MS)).sort((a, b) => (b.activity.updatedAt ?? 0) - (a.activity.updatedAt ?? 0));
   const visibleAgents = [...agents.values()].filter(({ activity, order }) => !(activity.status === "running" && (order < lastSessionStartOrder || order <= lastSessionEndOrder)) && (activity.status === "running" || now - (activity.updatedAt ?? 0) <= RECENT_TTL_MS)).sort((a, b) => (b.activity.updatedAt ?? 0) - (a.activity.updatedAt ?? 0));
   state.tools = visibleTools.map(({ activity }) => activity);
   state.agents = visibleAgents.map(({ activity }) => activity);
@@ -1798,7 +2046,7 @@ function foldEvents(events, now = Date.now()) {
 async function candidateFiles(dataDir) {
   let entries;
   try {
-    entries = await fs6.readdir(dataDir, { withFileTypes: true });
+    entries = await fs7.readdir(dataDir, { withFileTypes: true });
   } catch {
     return [];
   }
@@ -1806,9 +2054,9 @@ async function candidateFiles(dataDir) {
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith(".jsonl"))
       continue;
-    const filePath = path8.join(dataDir, entry.name);
+    const filePath = path9.join(dataDir, entry.name);
     try {
-      const stat = await fs6.stat(filePath);
+      const stat = await fs7.stat(filePath);
       files.push({ filePath, mtimeMs: stat.mtimeMs });
     } catch {
     }
@@ -1817,9 +2065,9 @@ async function candidateFiles(dataDir) {
 }
 async function canonicalPath(value) {
   try {
-    return await fs6.realpath(value);
+    return await fs7.realpath(value);
   } catch {
-    return path8.resolve(value);
+    return path9.resolve(value);
   }
 }
 async function loadState(query = {}, options = {}) {
@@ -1903,7 +2151,7 @@ function healthSourceById(id) {
 }
 
 // src/adapter.ts
-import path9 from "node:path";
+import path10 from "node:path";
 
 // src/design.ts
 var HUD_DESIGN = {
@@ -1998,7 +2246,7 @@ function snapshotFromClaude(facts, git = null, promotion = null) {
     observedAt: facts.observedAt,
     model: facts.model,
     cwd,
-    project: cwd ? path9.basename(cwd) : "",
+    project: cwd ? path10.basename(cwd) : "",
     context: facts.context,
     contextSize: facts.contextSize,
     totalInput: facts.totalInput,
@@ -2027,7 +2275,7 @@ function snapshotFromState(state, git = null, promotion = null) {
     observedAt: 0,
     model: state.model,
     cwd,
-    project: cwd ? path9.basename(cwd) : "",
+    project: cwd ? path10.basename(cwd) : "",
     context: null,
     contextSize: null,
     totalInput: null,
@@ -2056,7 +2304,7 @@ function snapshotFromCursor(facts, git = null, promotion = null) {
     observedAt: facts.observedAt,
     model: facts.model,
     effort: facts.effort,
-    project: cwd ? path9.basename(cwd) : "",
+    project: cwd ? path10.basename(cwd) : "",
     cwd,
     context: facts.context,
     contextSize: facts.contextSize,
@@ -2085,7 +2333,7 @@ function snapshotFromAntigravity(facts, fallbackGit = null, promotion = null) {
     observedAt: facts.observedAt,
     model: facts.model,
     effort: facts.effort,
-    project: cwd ? path9.basename(cwd) : "",
+    project: cwd ? path10.basename(cwd) : "",
     cwd,
     context: facts.context,
     contextSize: facts.contextSize,
@@ -2174,8 +2422,8 @@ function localTime(epochSeconds) {
 }
 
 // src/render.ts
-import os4 from "node:os";
-import path10 from "node:path";
+import os5 from "node:os";
+import path11 from "node:path";
 
 // ../../node_modules/get-east-asian-width/lookup-data.js
 var ambiguousMinimalCodePoint = 161;
@@ -2534,9 +2782,9 @@ function compactTokens(value) {
   return value >= 1e3 ? `${Math.floor(value / 1e3)}k` : `${Math.floor(value)}`;
 }
 function displayPath(cwd) {
-  const home = os4.homedir();
+  const home = os5.homedir();
   if (cwd === home) return "~";
-  if (cwd.startsWith(`${home}${path10.sep}`)) return `~/${cwd.slice(home.length + 1)}`;
+  if (cwd.startsWith(`${home}${path11.sep}`)) return `~/${cwd.slice(home.length + 1)}`;
   return cwd;
 }
 function quotaSeverity(snapshot, now = snapshot.observedAt) {
@@ -2569,6 +2817,28 @@ function quotaSeverity(snapshot, now = snapshot.observedAt) {
     severity = worseSeverity(severity, toneSeverity(pace));
   }
   return severity;
+}
+var IMPLICIT_QUOTA_LABELS = /* @__PURE__ */ new Set(["5h", "7d", "1d"]);
+function quotaTone(percent2) {
+  return toneFor(
+    Math.floor(percent2),
+    HUD_DESIGN.warning.quotaUsage.yellow,
+    HUD_DESIGN.warning.quotaUsage.red
+  );
+}
+function renderQuota(snapshot, colors) {
+  const { limits } = snapshot;
+  const implicit = limits.every((limit) => IMPLICIT_QUOTA_LABELS.has(limit.label));
+  if (implicit) {
+    const text = `#${limits.map((limit) => `${Math.floor(limit.percent)}%`).join("/")}`;
+    return signal(text, severityTone(quotaSeverity(snapshot)), colors);
+  }
+  const parts = limits.map((limit) => signal(
+    `${Math.floor(limit.percent)}%`,
+    quotaTone(limit.percent),
+    colors
+  ));
+  return `#${parts.join("/")}`;
 }
 function renderSnapshot(snapshot, options = {}) {
   const colors = options.colors ?? !process.env.NO_COLOR;
@@ -2611,8 +2881,7 @@ function renderSnapshot(snapshot, options = {}) {
     }
   }
   if (snapshot.limits.length) {
-    const quota = snapshot.limits.map((limit) => `${Math.floor(limit.percent)}%`).join("/");
-    line1.push(signal(`#${quota}`, severityTone(quotaSeverity(snapshot)), colors));
+    line1.push(renderQuota(snapshot, colors));
   }
   const resets = (snapshot.resets || []).map((reset) => formatReset(reset.resetAt, reset.label === "7d")).filter(Boolean);
   if (resets.length) {
@@ -2686,12 +2955,12 @@ function renderSnapshot(snapshot, options = {}) {
 }
 
 // src/setup.ts
-import fs7 from "node:fs/promises";
-import os5 from "node:os";
-import path11 from "node:path";
+import fs8 from "node:fs/promises";
+import os6 from "node:os";
+import path12 from "node:path";
 import { fileURLToPath } from "node:url";
-var ROOT = path11.resolve(path11.dirname(fileURLToPath(import.meta.url)), "..");
-var CLI_PATH = path11.join(ROOT, "dist", "cli.js");
+var ROOT = path12.resolve(path12.dirname(fileURLToPath(import.meta.url)), "..");
+var CLI_PATH = path12.join(ROOT, "dist", "cli.js");
 var CODEX_PRESETS = {
   compact: {
     status_line: [
@@ -2942,28 +3211,28 @@ function patchAntigravityHooks(text, executable = process.execPath, cliPath = CL
 async function writeWithBackup(filePath, content, dryRun = false) {
   let original = "";
   try {
-    original = await fs7.readFile(filePath, "utf8");
+    original = await fs8.readFile(filePath, "utf8");
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
   if (content === original) return { changed: false, backup: null, content };
   if (dryRun) return { changed: true, backup: null, content };
-  await fs7.mkdir(path11.dirname(filePath), { recursive: true });
+  await fs8.mkdir(path12.dirname(filePath), { recursive: true });
   let backup = null;
   if (original) {
     backup = `${filePath}.bak-agent-hud-${(/* @__PURE__ */ new Date()).toISOString().replace(/\D/g, "")}`;
-    await fs7.copyFile(filePath, backup);
+    await fs8.copyFile(filePath, backup);
   }
   const temporary = `${filePath}.${process.pid}.tmp`;
-  await fs7.writeFile(temporary, content, { encoding: "utf8", mode: 384 });
-  await fs7.rename(temporary, filePath);
+  await fs8.writeFile(temporary, content, { encoding: "utf8", mode: 384 });
+  await fs8.rename(temporary, filePath);
   return { changed: true, backup, content };
 }
 async function setupCodex(options = {}) {
-  const filePath = options.config || path11.join(process.env.CODEX_HOME || path11.join(os5.homedir(), ".codex"), "config.toml");
+  const filePath = options.config || path12.join(process.env.CODEX_HOME || path12.join(os6.homedir(), ".codex"), "config.toml");
   let original = "";
   try {
-    original = await fs7.readFile(filePath, "utf8");
+    original = await fs8.readFile(filePath, "utf8");
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
@@ -2971,11 +3240,11 @@ async function setupCodex(options = {}) {
   return { filePath, ...await writeWithBackup(filePath, content, options.dryRun) };
 }
 async function setupClaude(options = {}) {
-  const root = process.env.CLAUDE_CONFIG_DIR || path11.join(os5.homedir(), ".claude");
-  const filePath = options.config || path11.join(root, "settings.json");
+  const root = process.env.CLAUDE_CONFIG_DIR || path12.join(os6.homedir(), ".claude");
+  const filePath = options.config || path12.join(root, "settings.json");
   let original = "";
   try {
-    original = await fs7.readFile(filePath, "utf8");
+    original = await fs8.readFile(filePath, "utf8");
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
@@ -2983,14 +3252,14 @@ async function setupClaude(options = {}) {
   return { filePath, ...await writeWithBackup(filePath, content, options.dryRun) };
 }
 function piExtensionModule(cliPath = CLI_PATH) {
-  const target = path11.join(path11.dirname(cliPath), "pi-extension.js");
+  const target = path12.join(path12.dirname(cliPath), "pi-extension.js");
   return `// Written by \`agent-hud setup pi\`. Edit the plugin, not this file.
 export { default } from ${JSON.stringify(target)};
 `;
 }
 async function setupPi(options = {}) {
-  const root = process.env.PI_CODING_AGENT_DIR || path11.join(os5.homedir(), ".pi", "agent");
-  const filePath = options.config || path11.join(root, "extensions", "agent-hud.ts");
+  const root = process.env.PI_CODING_AGENT_DIR || path12.join(os6.homedir(), ".pi", "agent");
+  const filePath = options.config || path12.join(root, "extensions", "agent-hud.ts");
   const content = piExtensionModule(options.cliPath);
   return {
     filePath,
@@ -2999,16 +3268,16 @@ async function setupPi(options = {}) {
 }
 async function readOptional(filePath) {
   try {
-    return await fs7.readFile(filePath, "utf8");
+    return await fs8.readFile(filePath, "utf8");
   } catch (error) {
     if (error.code === "ENOENT") return "";
     throw error;
   }
 }
 async function setupCursor(options = {}) {
-  const root = process.env.CURSOR_CONFIG_DIR || path11.join(os5.homedir(), ".cursor");
-  const filePath = options.config || path11.join(root, "cli-config.json");
-  const hooksFilePath = options.hooksConfig || path11.join(root, "hooks.json");
+  const root = process.env.CURSOR_CONFIG_DIR || path12.join(os6.homedir(), ".cursor");
+  const filePath = options.config || path12.join(root, "cli-config.json");
+  const hooksFilePath = options.hooksConfig || path12.join(root, "hooks.json");
   const content = patchCursorConfig(
     await readOptional(filePath),
     options.executable,
@@ -3029,10 +3298,10 @@ async function setupCursor(options = {}) {
   };
 }
 async function setupAntigravity(options = {}) {
-  const settingsRoot = process.env.ANTIGRAVITY_CONFIG_DIR || path11.join(os5.homedir(), ".gemini", "antigravity-cli");
-  const hooksRoot = process.env.GEMINI_CUSTOMIZATION_DIR || path11.join(os5.homedir(), ".gemini", "config");
-  const filePath = options.config || path11.join(settingsRoot, "settings.json");
-  const hooksFilePath = options.hooksConfig || path11.join(hooksRoot, "hooks.json");
+  const settingsRoot = process.env.ANTIGRAVITY_CONFIG_DIR || path12.join(os6.homedir(), ".gemini", "antigravity-cli");
+  const hooksRoot = process.env.GEMINI_CUSTOMIZATION_DIR || path12.join(os6.homedir(), ".gemini", "config");
+  const filePath = options.config || path12.join(settingsRoot, "settings.json");
+  const hooksFilePath = options.hooksConfig || path12.join(hooksRoot, "hooks.json");
   const content = patchAntigravitySettings(
     await readOptional(filePath),
     options.executable,
@@ -3109,8 +3378,10 @@ async function statusline() {
   }
   if (isCursor) {
     const host = input;
+    const plan = await readCursorPlanUsage();
+    if (plan.stale) await spawnCursorUsageRefresh(CLI_PATH2);
     const snapshot2 = snapshotFromCursor(
-      normalizeCursorStatus(host, state),
+      normalizeCursorStatus(host, state, void 0, plan.usage),
       getGitStatus(cwd),
       currentPromotion({ platform: "cursor" })
     );
@@ -3323,6 +3594,14 @@ ${result.hooks.content}`
     }
   }
 }
+async function refreshCursorUsageCommand(args) {
+  const lockPath = valueAfter(args, "--refresh-lock");
+  const lockToken = valueAfter(args, "--refresh-token");
+  await refreshCursorPlanUsage({
+    home: valueAfter(args, "--home") || void 0,
+    lease: lockPath && lockToken ? { path: lockPath, token: lockToken } : void 0
+  });
+}
 async function refreshHealthCommand(args) {
   const source = healthSourceById(valueAfter(args, "--source") || "");
   if (!source) return;
@@ -3374,6 +3653,7 @@ async function main(argv = process2.argv.slice(2)) {
     return promotions(hookPlatform(args), valueAfter(args, "--endpoint") ?? void 0);
   }
   if (command === "refresh-health") return refreshHealthCommand(args);
+  if (command === "refresh-cursor-usage") return refreshCursorUsageCommand(args);
   if (command === "refresh-promotions") {
     await refreshSharedPromotions();
     return;
@@ -3384,9 +3664,9 @@ function isMainModule() {
   const executable = process2.argv[1];
   if (!executable) return false;
   try {
-    return fs8.realpathSync(fileURLToPath2(import.meta.url)) === fs8.realpathSync(executable);
+    return fs9.realpathSync(fileURLToPath2(import.meta.url)) === fs9.realpathSync(executable);
   } catch {
-    return path12.resolve(fileURLToPath2(import.meta.url)) === path12.resolve(executable);
+    return path13.resolve(fileURLToPath2(import.meta.url)) === path13.resolve(executable);
   }
 }
 if (isMainModule()) {

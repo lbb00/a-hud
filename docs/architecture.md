@@ -60,7 +60,7 @@ That prohibition is tested by `packages/provider/test/boundary.test.mjs`.
 - `cli.ts` composes the two layers and bundles a self-contained plugin runtime.
 
 Claude, Cursor and Antigravity support the complete custom three-line renderer.
-Cursor omits quota because its live status payload has no quota fact.
+Cursor shows cached Auto and API plan usage, and omits those pools when the cache is empty. Its live status payload still has no quota fact.
 Antigravity contributes native quota, VCS, lifecycle and background-task facts.
 Codex exposes only predefined native footer items, so its footer mirrors the
 same hierarchy and omits the unavailable five-hour item. The optional companion

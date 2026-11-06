@@ -140,7 +140,7 @@ an empty schedule.
 | `AGENT_HUD_NO_REMOTE` | Set to `1` to never fetch the shared schedule |
 | `NO_COLOR` | Disable ANSI styling |
 
-The internal `refresh-health` and `refresh-promotions` commands are reserved for
-the background Anthropic Statuspage and shared-schedule refresh processes. They
+The internal `refresh-health`, `refresh-promotions`, and `refresh-cursor-usage` commands are reserved for
+the background status, schedule, and Cursor plan-usage refresh processes. They
 are not public interactive commands: a status line starts them detached when its
 cache is due, so a repaint never waits on the network.
