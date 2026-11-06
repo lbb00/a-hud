@@ -1,0 +1,45 @@
+name: Publish to npm
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish a-hud to npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+
+      - name: Use the reviewed npm toolchain
+        run: npm install --global npm@11.16.0
+
+      - name: Install exact dependencies
+        run: npm ci
+
+      - name: Run quality gate
+        run: npm run check
+
+      - name: Lint packed package contracts
+        run: npm run package:lint
+
+      - name: Exercise packed public artifacts
+        run: npm run package:smoke
+
+      - name: Publish a-hud to npm with provenance
+        run: npm publish --provenance --access public --workspace a-hud
