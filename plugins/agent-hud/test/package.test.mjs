@@ -88,8 +88,9 @@ test("ships open-source governance, secure CI, and reviewed install scripts", as
 
 test("ships TypeScript source as an ESM package with a compiled CLI", async () => {
   const manifest = JSON.parse(await fs.readFile(path.join(root, "package.json"), "utf8"));
+  assert.equal(manifest.name, "a-hud");
   assert.equal(manifest.type, "module");
-  assert.equal(manifest.bin["agent-hud"], "./dist/cli.js");
+  assert.deepEqual(manifest.bin, { "a-hud": "./dist/cli.js" });
   const claudeManifest = JSON.parse(
     await fs.readFile(path.join(root, ".claude-plugin", "plugin.json"), "utf8"),
   );
@@ -106,6 +107,9 @@ test("ships TypeScript source as an ESM package with a compiled CLI", async () =
   assert.equal(codexManifest.version, manifest.version);
   assert.equal(cursorManifest.version, manifest.version);
   assert.equal(antigravityManifest.name, manifest.name);
+  assert.equal(claudeManifest.name, manifest.name);
+  assert.equal(codexManifest.name, manifest.name);
+  assert.equal(cursorManifest.name, manifest.name);
 
   const sourceFiles = (await fs.readdir(path.join(root, "src"))).sort();
   assert.ok(sourceFiles.includes("cli.ts"));

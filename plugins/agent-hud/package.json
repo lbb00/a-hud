@@ -1,6 +1,6 @@
 {
-  "name": "agent-hud",
-  "version": "0.4.0",
+  "name": "a-hud",
+  "version": "0.5.0",
   "description": "One terminal HUD for Codex, Claude Code, Cursor and Antigravity",
   "keywords": [
     "agent",
@@ -28,7 +28,7 @@
     "skills"
   ],
   "bin": {
-    "agent-hud": "./dist/cli.js"
+    "a-hud": "./dist/cli.js"
   },
   "scripts": {
     "build": "npm run build --workspace @agent-hud/provider && tsc -p tsconfig.json && esbuild src/cli.ts src/adapter.ts src/design.ts src/pi-extension.ts src/promotions-cli.ts src/render.ts src/setup.ts src/terminal-width.ts --bundle --platform=node --format=esm --target=node18 --outdir=dist --sourcemap",
@@ -38,7 +38,7 @@
     "check": "npm run build && node --test"
   },
   "devDependencies": {
-    "@agent-hud/provider": "0.2.0",
+    "@agent-hud/provider": "0.3.0",
     "@types/node": "^26.6.2",
     "esbuild": "^0.28.2",
     "get-east-asian-width": "^1.7.0",

@@ -17,8 +17,8 @@
     "esbuild@0.28.2": true
   },
   "scripts": {
-    "build": "npm run build --workspace agent-hud",
-    "test": "node --test scripts/*.test.mjs && npm run test --workspace @agent-hud/provider && npm run test --workspace agent-hud",
+    "build": "npm run build --workspace a-hud",
+    "test": "node --test scripts/*.test.mjs && npm run test --workspace @agent-hud/provider && npm run test --workspace a-hud",
     "lint": "oxlint . --deny-warnings",
     "lint:fix": "oxlint . --fix",
     "docs:check": "node scripts/check-doc-links.mjs",

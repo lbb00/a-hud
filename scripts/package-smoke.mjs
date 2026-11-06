@@ -85,7 +85,7 @@ const temporaryRoot = await fs.mkdtemp(
 
 try {
   const provider = pack("@agent-hud/provider", temporaryRoot);
-  const plugin = pack("agent-hud", temporaryRoot);
+  const plugin = pack("a-hud", temporaryRoot);
   const providerPaths = packedPaths(provider.metadata);
   const pluginPaths = packedPaths(plugin.metadata);
 
@@ -148,7 +148,7 @@ try {
 
   const demo = run(
     process.execPath,
-    [path.join(consumer, "node_modules", "agent-hud", "dist", "cli.js"), "demo"],
+    [path.join(consumer, "node_modules", "a-hud", "dist", "cli.js"), "demo"],
     { cwd: consumer },
   );
   assert.match(demo, /^gpt-5\.6-sol \| H \| 90k\/45% 26t/u);
