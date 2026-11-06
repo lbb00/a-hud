@@ -30,6 +30,15 @@
   "bin": {
     "a-hud": "./dist/cli.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lbb00/a-hud.git",
+    "directory": "plugins/agent-hud"
+  },
+  "homepage": "https://github.com/lbb00/a-hud#readme",
+  "bugs": {
+    "url": "https://github.com/lbb00/a-hud/issues"
+  },
   "scripts": {
     "build": "npm run build --workspace @agent-hud/provider && tsc -p tsconfig.json && esbuild src/cli.ts src/adapter.ts src/design.ts src/pi-extension.ts src/promotions-cli.ts src/render.ts src/setup.ts src/terminal-width.ts --bundle --platform=node --format=esm --target=node18 --outdir=dist --sourcemap",
     "pretest": "npm run build",

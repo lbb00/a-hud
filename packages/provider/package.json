@@ -25,6 +25,15 @@
     "README.md",
     "README.zh-CN.md"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lbb00/a-hud.git",
+    "directory": "packages/provider"
+  },
+  "homepage": "https://github.com/lbb00/a-hud#readme",
+  "bugs": {
+    "url": "https://github.com/lbb00/a-hud/issues"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "pretest": "npm run build",

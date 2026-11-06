@@ -2,6 +2,14 @@
   "name": "agent-hud-workspace",
   "description": "Shared workspace for the Agent HUD provider and multi-host terminal plugin",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lbb00/a-hud.git"
+  },
+  "homepage": "https://github.com/lbb00/a-hud#readme",
+  "bugs": {
+    "url": "https://github.com/lbb00/a-hud/issues"
+  },
   "license": "MIT",
   "type": "module",
   "workspaces": [
