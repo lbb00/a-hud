@@ -59,6 +59,18 @@ test("normalizes the complete Claude host schema before the UI boundary", () => 
   assert.equal(facts.turns, 16);
 });
 
+test("keeps the 5h slot at 0% after Claude Code drops the expired window", () => {
+  const facts = normalizeClaudeStatus({
+    rate_limits: { seven_day: { used_percentage: 42, resets_at: 3_000 } },
+  }, state, derived);
+
+  assert.deepEqual(
+    facts.limits.map(({ label, percent }) => ({ label, percent })),
+    [{ label: "5h", percent: 0 }, { label: "7d", percent: 42 }],
+  );
+  assert.deepEqual(facts.resets, [{ label: "7d", resetAt: 3_000 }]);
+});
+
 test("preserves waiting as a provider lifecycle fact", () => {
   const facts = normalizeClaudeStatus({}, { ...state, status: "waiting" }, derived);
   assert.equal(facts.status, "waiting");

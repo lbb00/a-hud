@@ -96,6 +96,7 @@ export function foldEvents(events: HookEvent[], now = Date.now()): ProviderState
   let lastSessionEndOrder = -1;
   let lastSessionStartOrder = -1;
   let lastWaitingOrder = -1;
+  let lastStopOrder = -1;
 
   for (const [order, event] of events.entries()) {
     state.platform = event.platform || state.platform;
@@ -129,6 +130,7 @@ export function foldEvents(events: HookEvent[], now = Date.now()): ProviderState
     }
     if (event.type === "Stop") {
       state.status = event.backgroundTasksRunning ? "working" : "idle";
+      lastStopOrder = order;
     }
     if (event.type === "SessionEnd") {
       state.status = "idle";
@@ -167,10 +169,14 @@ export function foldEvents(events: HookEvent[], now = Date.now()): ProviderState
     if (event.plan) state.plan = event.plan;
   }
 
+  // A turn cannot end with one of its tool calls still open, so a tool still
+  // marked running before the latest Stop lost its PostToolUse (a host can
+  // disable that hook). Subagents can outlive the turn and are not ended here.
   const visibleTools = [...tools.values()]
     .filter(({ activity, order }) =>
       !(activity.status === "running" &&
-        (order < lastSessionStartOrder || order <= lastSessionEndOrder)) &&
+        (order < lastSessionStartOrder || order <= lastSessionEndOrder ||
+          order < lastStopOrder)) &&
       (activity.status === "running" ||
         now - (activity.updatedAt ?? 0) <= RECENT_TTL_MS)
     )
@@ -188,7 +194,8 @@ export function foldEvents(events: HookEvent[], now = Date.now()): ProviderState
   state.turns = turns.size;
 
   // Precedence is intentionally small and fact-based:
-  //   SessionEnd ends earlier running activity; a structured needs-input event
+  //   SessionEnd ends earlier running activity, Stop ends earlier running
+  //   tools; a structured needs-input event
   //   holds "waiting" over earlier activity; current activity > ordinary Stop;
   //   Stop with a running background task > ordinary Stop.
   // Activity after a SessionEnd is newer evidence and can reanimate a session.
