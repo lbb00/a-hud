@@ -24,7 +24,7 @@ test("wires Oxlint into the workspace quality gate", async () => {
   assert.match(manifest.scripts["release:check"], /npm run package:lint/);
   assert.match(manifest.scripts["package:lint"], /publint/u);
   assert.match(manifest.scripts["package:lint"], /attw/u);
-  assert.equal(manifest.devDependencies.publint, "^0.3.24");
+  assert.equal(manifest.devDependencies.publint, "^0.3.25");
   assert.equal(manifest.devDependencies["@arethetypeswrong/cli"], "^0.18.5");
   assert.match(manifest.devDependencies.oxlint, /^\^1\./);
   assert.equal(manifest.engines.node, "^20.19.0 || >=22.12.0");
@@ -83,7 +83,7 @@ test("ships open-source governance, secure CI, and reviewed install scripts", as
   assert.match(ci, /Published runtime \/ Node 18/u);
   assert.doesNotMatch(ci, /uses: [^@\n]+@v\d+/u);
   assert.match(ci, /actions\/checkout@[a-f\d]{40} # v7\.0\.1/u);
-  assert.match(ci, /actions\/setup-node@[a-f\d]{40} # v7\.0\.0/u);
+  assert.match(ci, /actions\/setup-node@[a-f\d]{40} # v7\.1\.0/u);
 });
 
 test("ships TypeScript source as an ESM package with a compiled CLI", async () => {
