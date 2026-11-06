@@ -22,6 +22,7 @@ export interface TranscriptFileFacts {
   turns: number;
   cacheTtlSeconds: number;
   mtimeSeconds: number;
+  latestTimestampSeconds?: number;
 }
 
 interface TranscriptCache extends TranscriptFileFacts {
@@ -101,7 +102,8 @@ async function readTranscriptCache(
       cached.endedWithNewline !== true ||
       !Number.isFinite(cached.device) ||
       !Number.isFinite(cached.inode) ||
-      typeof cached.tailDigest !== "string"
+      typeof cached.tailDigest !== "string" ||
+      (cached.latestTimestampSeconds !== undefined && !Number.isFinite(cached.latestTimestampSeconds))
     ) return null;
     return cached;
   } catch {
@@ -160,10 +162,13 @@ export async function readTranscriptFacts(
       cached.device === stat.dev &&
       cached.inode === stat.ino
     ) {
-      const unchanged = {
+      const unchanged: TranscriptFileFacts = {
         turns: cached.turns,
         cacheTtlSeconds: cached.cacheTtlSeconds,
         mtimeSeconds: cached.mtimeSeconds,
+        ...(cached.latestTimestampSeconds && cached.latestTimestampSeconds > 0
+          ? { latestTimestampSeconds: cached.latestTimestampSeconds }
+          : {}),
       };
       await maintainCache();
       return unchanged;
@@ -177,6 +182,7 @@ export async function readTranscriptFacts(
       : null;
     const scanStart = appendCache?.size ?? 0;
     const ids = new Set<string>(appendCache?.ids ?? []);
+    let latestTimestampSeconds = appendCache?.latestTimestampSeconds ?? 0;
     const evidenceCapacity = 600;
     const recentEvidence = Array.from({ length: evidenceCapacity }, () => 0);
     let recentCount = 0;
@@ -186,6 +192,7 @@ export async function readTranscriptFacts(
     }
     let overlap = "";
     let lineIds = new Set<string>();
+    let lineTimestampSeconds = 0;
     let lineIsSidechain = false;
     let lineIsAssistant = false;
     let lineHasMessageObject = false;
@@ -214,11 +221,20 @@ export async function readTranscriptFacts(
           lineSawOneHourWrite = true;
         }
       }
+      for (const match of scan.matchAll(/"timestamp"\s*:\s*"([^"]+)"/g)) {
+        const parsed = Math.floor(Date.parse(match[1]) / 1_000);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          lineTimestampSeconds = Math.max(lineTimestampSeconds, parsed);
+        }
+      }
       overlap = scan.slice(-256);
     };
     const finishLine = () => {
       if (!lineIsSidechain) {
         for (const id of lineIds) ids.add(id);
+        if (lineTimestampSeconds > 0) {
+          latestTimestampSeconds = Math.max(latestTimestampSeconds, lineTimestampSeconds);
+        }
       }
       const lineHasCacheWrite = lineIsAssistant &&
         lineHasMessageObject &&
@@ -230,6 +246,7 @@ export async function readTranscriptFacts(
       recentCount += 1;
       overlap = "";
       lineIds = new Set<string>();
+      lineTimestampSeconds = 0;
       lineIsSidechain = false;
       lineIsAssistant = false;
       lineHasMessageObject = false;
@@ -280,19 +297,25 @@ export async function readTranscriptFacts(
     }
     const completeIds = [...ids];
     const completeEvidence = orderedEvidence();
+    const completeTimestampSeconds = latestTimestampSeconds;
     if (lineTouched) finishLine();
     const evidence = orderedEvidence();
     const cacheTtlSeconds = ttlFor(evidence);
     const after = await fs.stat(transcriptPath);
-    const result = {
+    const mtimeSeconds = latestTimestampSeconds > 0
+      ? latestTimestampSeconds
+      : Math.floor(after.mtimeMs / 1_000);
+    const result: TranscriptFileFacts = {
       turns: ids.size,
       cacheTtlSeconds,
-      mtimeSeconds: Math.floor(after.mtimeMs / 1_000),
+      mtimeSeconds,
+      ...(latestTimestampSeconds > 0 ? { latestTimestampSeconds } : {}),
     };
     if (after.size === stat.size && after.mtimeMs === stat.mtimeMs) {
       const cacheSize = endedWithNewline ? after.size : lastCompleteOffset;
       const cacheIds = endedWithNewline ? [...ids] : completeIds;
       const cacheEvidence = endedWithNewline ? evidence : completeEvidence;
+      const cacheTimestamp = endedWithNewline ? latestTimestampSeconds : completeTimestampSeconds;
       await writeTranscriptCache(cachePath, {
         v: 2,
         transcriptPath,
@@ -307,7 +330,8 @@ export async function readTranscriptFacts(
         scanStart,
         turns: cacheIds.length,
         cacheTtlSeconds: ttlFor(cacheEvidence),
-        mtimeSeconds: result.mtimeSeconds,
+        mtimeSeconds: cacheTimestamp > 0 ? cacheTimestamp : result.mtimeSeconds,
+        latestTimestampSeconds: cacheTimestamp,
       });
     }
     await maintainCache();
