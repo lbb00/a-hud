@@ -300,10 +300,13 @@ export async function appendJsonLine(filePath: string, value: unknown): Promise<
 }
 
 export async function readTail(filePath: string, maxBytes = 384 * 1024): Promise<string> {
-  await ensurePrivateFile(filePath);
-  const handle = await fs.open(filePath, "r");
+  const flags = process.platform === "win32"
+    ? fs.constants.O_RDONLY
+    : (fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+  const handle = await fs.open(filePath, flags);
   try {
     const stat = await handle.stat();
+    if (!stat.isFile() || stat.size === 0) return "";
     const length = Math.min(stat.size, maxBytes);
     const buffer = Buffer.alloc(length);
     const { bytesRead } = await handle.read(buffer, 0, length, stat.size - length);

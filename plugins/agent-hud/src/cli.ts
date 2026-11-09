@@ -7,6 +7,7 @@ import {
   claudeApiEndpoint,
   currentPromotion,
   deriveClaudeTelemetry,
+  emptyProviderState,
   getGitStatus,
   healthSourceById,
   healthSourceFor,
@@ -29,6 +30,7 @@ import {
   type GitStatus,
   type JsonObject,
   type Platform,
+  type ProviderState,
 } from "@agent-hud/provider";
 import {
   snapshotFromAntigravity,
@@ -84,14 +86,17 @@ async function hook(args: string[]): Promise<void> {
   process.stdout.write(`${JSON.stringify(response)}\n`);
 }
 
+function printStatusline(text: string): void {
+  process.stdout.once("error", () => process.exit(0));
+  process.stdout.write(`${text}\n`, () => process.exit(0));
+}
+
 async function statusline(): Promise<void> {
+  const startedAt = Date.now();
   const input = await readJsonStdin() as (
     ClaudeStatusInput | CursorStatusInput | AntigravityStatusInput
   ) | null;
   if (!input) return;
-  // The shared promotional schedule is fetched by a detached child, never here:
-  // a status line must not wait on the network.
-  await spawnPromotionsRefresh(CLI_PATH);
   const isAntigravity =
     (input as AntigravityStatusInput).product === "antigravity" ||
     typeof (input as AntigravityStatusInput).agent_state === "string";
@@ -99,25 +104,53 @@ async function statusline(): Promise<void> {
     typeof (input as CursorStatusInput).autorun === "boolean" ||
     Number.isFinite((input as CursorStatusInput).render_width_chars)
   );
-  const state = await loadState({
-    sessionId: input.session_id ||
-      (input as AntigravityStatusInput).conversation_id,
-    transcriptPath: input.transcript_path,
-    cwd: input.workspace?.current_dir || input.cwd,
-    platform: isAntigravity ? "antigravity" : isCursor ? "cursor" : "claude",
+  const platform: Platform = isAntigravity
+    ? "antigravity"
+    : isCursor
+    ? "cursor"
+    : "claude";
+  const sessionId = input.session_id ||
+    (input as AntigravityStatusInput).conversation_id || "";
+  const transcriptPath = input.transcript_path || "";
+  const cwdInput = input.workspace?.current_dir || input.cwd || "";
+
+  // The shared promotional schedule is fetched by a detached child, never here:
+  // a status line must not wait on the network.
+  const promotionsPromise = spawnPromotionsRefresh(CLI_PATH).catch(() => false);
+  const controller = new AbortController();
+  const query = { sessionId, transcriptPath, cwd: cwdInput, platform };
+  let timer: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<ProviderState>((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve(emptyProviderState(query));
+    }, 2_000);
+    timer.unref?.();
   });
-  const cwd = input.workspace?.current_dir || input.cwd || state.cwd;
+  const state = await Promise.race([
+    loadState(query, { signal: controller.signal }),
+    timeoutPromise,
+  ]);
+  if (timer) clearTimeout(timer);
+  await promotionsPromise;
+  const cwd = cwdInput || state.cwd;
+  const readGit = (targetCwd: string): GitStatus | null => {
+    if (controller.signal.aborted) return null;
+    const remainingBudget = Math.max(0, 3_500 - (Date.now() - startedAt));
+    if (remainingBudget < 200) return null;
+    return getGitStatus(targetCwd, Math.min(500, remainingBudget));
+  };
   if (isAntigravity) {
     const host = input as AntigravityStatusInput;
     const snapshot = snapshotFromAntigravity(
       normalizeAntigravityStatus(host, state),
-      host.vcs ? null : getGitStatus(cwd),
+      host.vcs ? null : readGit(cwd),
       currentPromotion({ platform: "antigravity" }),
     );
-    process.stdout.write(`${renderSnapshot(snapshot, {
+    printStatusline(renderSnapshot(snapshot, {
       activity: false,
       width: finiteWidth(host.terminal_width),
-    })}\n`);
+    }));
     return;
   }
   if (isCursor) {
@@ -126,13 +159,13 @@ async function statusline(): Promise<void> {
     if (plan.stale) await spawnCursorUsageRefresh(CLI_PATH);
     const snapshot = snapshotFromCursor(
       normalizeCursorStatus(host, state, undefined, plan.usage),
-      getGitStatus(cwd),
+      readGit(cwd),
       currentPromotion({ platform: "cursor" }),
     );
-    process.stdout.write(`${renderSnapshot(snapshot, {
+    printStatusline(renderSnapshot(snapshot, {
       activity: false,
       width: finiteWidth(host.render_width_chars),
-    })}\n`);
+    }));
     return;
   }
   const endpoint = claudeApiEndpoint();
@@ -149,10 +182,10 @@ async function statusline(): Promise<void> {
   }
   const snapshot = snapshotFromClaude(
     facts,
-    getGitStatus(cwd),
+    readGit(cwd),
     currentPromotion({ platform: "claude", endpoint }),
   );
-  process.stdout.write(`${renderSnapshot(snapshot, { activity: false })}\n`);
+  printStatusline(renderSnapshot(snapshot, { activity: false }));
 }
 
 function finiteWidth(value: unknown): number | undefined {

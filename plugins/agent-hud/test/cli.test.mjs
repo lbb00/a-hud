@@ -282,3 +282,66 @@ test("returns neutral Antigravity hook decisions without changing permissions", 
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), { decision: "" });
 });
+
+test("statusline exits promptly with code 0 on fallback", async (t) => {
+  const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const dataRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agent-hud-statusline-exit-"));
+  t.after(() => fs.rm(dataRoot, { recursive: true, force: true }));
+  const result = spawnSync(
+    process.execPath,
+    [path.join(pluginRoot, "dist", "cli.js"), "statusline"],
+    {
+      encoding: "utf8",
+      input: JSON.stringify({
+        product: "antigravity",
+        conversation_id: "non-existent-conv-id",
+        cwd: "/non-existent-dir",
+      }),
+      env: {
+        ...process.env,
+        AGENT_HUD_DATA_DIR: dataRoot,
+        AGENT_HUD_NO_REMOTE: "1",
+        NO_COLOR: "1",
+      },
+      timeout: 3_000,
+    },
+  );
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test("statusline handles non-regular event files like FIFO without hanging", async (t) => {
+  if (process.platform === "win32") return;
+  const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const dataRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agent-hud-statusline-fifo-"));
+  t.after(() => fs.rm(dataRoot, { recursive: true, force: true }));
+  const dataDir = path.join(dataRoot, "events");
+  await fs.mkdir(dataDir, { recursive: true });
+
+  const crypto = await import("node:crypto");
+  const sessionId = "fifo-conv-id";
+  const digest = crypto.createHash("sha256").update(sessionId).digest("hex").slice(0, 24);
+  const fifoPath = path.join(dataDir, `${digest}.jsonl`);
+  spawnSync("mkfifo", [fifoPath]);
+
+  const result = spawnSync(
+    process.execPath,
+    [path.join(pluginRoot, "dist", "cli.js"), "statusline"],
+    {
+      encoding: "utf8",
+      input: JSON.stringify({
+        product: "antigravity",
+        conversation_id: sessionId,
+        cwd: "/non-existent-dir",
+      }),
+      env: {
+        ...process.env,
+        AGENT_HUD_DATA_DIR: dataRoot,
+        AGENT_HUD_NO_REMOTE: "1",
+        NO_COLOR: "1",
+      },
+      timeout: 3_000,
+    },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.stdout.trim().length > 0);
+});

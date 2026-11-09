@@ -37,6 +37,7 @@ interface StoreOptions {
   now?: () => number;
   platform?: Platform;
   event?: string;
+  signal?: AbortSignal;
 }
 
 interface StateQuery {
@@ -220,18 +221,21 @@ async function candidateFiles(dataDir: string): Promise<Array<{ filePath: string
   } catch {
     return [];
   }
-  const files = [];
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
-    const filePath = path.join(dataDir, entry.name);
-    try {
-      const stat = await fs.stat(filePath);
-      files.push({ filePath, mtimeMs: stat.mtimeMs });
-    } catch {
-      // File may disappear during cleanup.
-    }
-  }
-  return files.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, 24);
+  const jsonlEntries = entries.filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"));
+  const stats = await Promise.all(
+    jsonlEntries.map(async (entry) => {
+      const filePath = path.join(dataDir, entry.name);
+      try {
+        const stat = await fs.stat(filePath);
+        return { filePath, mtimeMs: stat.mtimeMs };
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return (stats.filter(Boolean) as Array<{ filePath: string; mtimeMs: number }>)
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)
+    .slice(0, 24);
 }
 
 async function canonicalPath(value: string): Promise<string> {
@@ -242,6 +246,15 @@ async function canonicalPath(value: string): Promise<string> {
   }
 }
 
+export function emptyProviderState(query: StateQuery = {}, now = Date.now()): ProviderState {
+  const empty = foldEvents([], now);
+  empty.cwd = query.cwd || "";
+  empty.transcriptPath = query.transcriptPath || "";
+  empty.sessionId = query.sessionId || "";
+  empty.platform = query.platform || empty.platform;
+  return empty;
+}
+
 export async function loadState(
   query: StateQuery = {},
   options: StoreOptions = {},
@@ -249,9 +262,11 @@ export async function loadState(
   const dataDir = options.dataDir || resolveDataDir(options.env);
   await ensurePrivateDirectory(dataDir).catch(() => undefined);
   const finish = async (state: ProviderState, protectedPath?: string) => {
-    await maybeSweepPrivateFiles(dataDir, EVENT_FILE_HYGIENE, {
-      protectedPaths: protectedPath ? [protectedPath] : [],
-    });
+    if (!options.signal?.aborted) {
+      await maybeSweepPrivateFiles(dataDir, EVENT_FILE_HYGIENE, {
+        protectedPaths: protectedPath ? [protectedPath] : [],
+      });
+    }
     return state;
   };
   const queryCwd = query.cwd ? await canonicalPath(query.cwd) : "";
@@ -273,18 +288,31 @@ export async function loadState(
   }
 
   const files = await candidateFiles(dataDir);
+  const canonicalCache = new Map<string, string>();
+  const resolveCanonical = async (target: string) => {
+    let resolved = canonicalCache.get(target);
+    if (resolved === undefined) {
+      resolved = await canonicalPath(target);
+      canonicalCache.set(target, resolved);
+    }
+    return resolved;
+  };
   let fallback: ProviderState | null = null;
   let fallbackPath = "";
   for (const { filePath } of files) {
+    if (options.signal?.aborted) break;
     try {
-      const events = parseEvents(await readTail(filePath));
+      const text = await readTail(filePath);
+      if (!text.trim()) continue;
+      if (query.platform && !text.includes(`"platform":"${query.platform}"`)) continue;
+      const events = parseEvents(text);
       if (!events.length) continue;
       const state = foldEvents(events, options.now?.() ?? Date.now());
       if (query.platform && state.platform !== query.platform) continue;
       if (query.transcriptPath && state.transcriptPath === query.transcriptPath) {
         return finish(state, filePath);
       }
-      if (queryCwd && state.cwd && await canonicalPath(state.cwd) === queryCwd) {
+      if (queryCwd && state.cwd && (state.cwd === queryCwd || await resolveCanonical(state.cwd) === queryCwd)) {
         return finish(state, filePath);
       }
       if (!queryCwd && !query.transcriptPath && !fallback) {
@@ -295,10 +323,6 @@ export async function loadState(
       // Ignore a corrupt or concurrently removed session.
     }
   }
-  const empty = foldEvents([], options.now?.() ?? Date.now());
-  empty.cwd = query.cwd || "";
-  empty.transcriptPath = query.transcriptPath || "";
-  empty.sessionId = query.sessionId || "";
-  empty.platform = query.platform || empty.platform;
+  const empty = emptyProviderState(query, options.now?.() ?? Date.now());
   return finish(fallback || empty, fallback ? fallbackPath : undefined);
 }
