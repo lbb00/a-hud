@@ -2,7 +2,7 @@
   "name": "a-hud",
   "displayName": "Agent HUD",
   "description": "One HUD for Cursor, Claude Code, Codex and Antigravity",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "author": {
     "name": "Agent HUD contributors"
   },

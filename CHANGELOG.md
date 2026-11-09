@@ -3,6 +3,16 @@
 All notable user-visible changes to Agent HUD are documented here. The project
 uses semantic versioning for each published workspace package.
 
+## a-hud 0.5.1 and @agent-hud/provider 0.3.1 - 2026-11-09
+
+### Fixed
+
+- Hardened statusline execution with a 2,000ms safety timeout race and AbortSignal support to guarantee prompt rendering and avoid process termination under strict host deadlines (such as Antigravity CLI's 5s hard timeout).
+- Eliminated synchronous permission mutations on read-only file tail operations and opened event files with non-blocking flags to prevent indefinite thread hangs on FIFOs or non-regular files.
+- Parallelized candidate event file stat checks and added platform-level pre-filtering to minimize disk I/O and deserialization latency on slow or external drives.
+- Enforced a unified global budget deadline across sequential Git subprocess invocations and skipped Git queries when remaining statusline execution time is depleted.
+- Preserved accurate dirty repository detection on Git buffer overflow (`ENOBUFS`) while ensuring Git failures and timeouts cleanly yield neutral repository state rather than falsely reporting clean working trees.
+
 ## a-hud 0.5.0 and @agent-hud/provider 0.3.0 - 2026-11-06
 
 ### Added
