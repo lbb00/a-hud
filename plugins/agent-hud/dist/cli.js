@@ -217,10 +217,12 @@ async function appendJsonLine(filePath, value) {
   await ensurePrivateFile(filePath);
 }
 async function readTail(filePath, maxBytes = 384 * 1024) {
-  await ensurePrivateFile(filePath);
-  const handle = await fs.open(filePath, "r");
+  const flags = process.platform === "win32" ? fs.constants.O_RDONLY : fs.constants.O_RDONLY | fs.constants.O_NONBLOCK;
+  const handle = await fs.open(filePath, flags);
   try {
     const stat = await handle.stat();
+    if (!stat.isFile() || stat.size === 0)
+      return "";
     const length = Math.min(stat.size, maxBytes);
     const buffer = Buffer.alloc(length);
     const { bytesRead } = await handle.read(buffer, 0, length, stat.size - length);
@@ -243,26 +245,47 @@ function safePath(value) {
 
 // ../../packages/provider/dist/git.js
 import { execFileSync } from "node:child_process";
-function getGitStatus(cwd) {
-  if (!cwd)
+var GIT_TIMEOUT_MS = 500;
+var REV_LIST_TIMEOUT_MS = 300;
+function getGitStatus(cwd, timeoutMs = GIT_TIMEOUT_MS) {
+  if (!cwd || timeoutMs <= 0)
     return null;
+  const deadline = Date.now() + timeoutMs;
   try {
-    const run = (args) => execFileSync("git", ["-C", cwd, ...args], {
-      encoding: "utf8",
-      timeout: 1e3,
-      stdio: ["ignore", "pipe", "ignore"],
-      env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" }
-    }).trim();
+    const run = (args, maxCommandTimeout = timeoutMs) => {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        throw new Error("Git deadline exceeded");
+      }
+      return execFileSync("git", ["-C", cwd, ...args], {
+        encoding: "utf8",
+        timeout: Math.min(maxCommandTimeout, remaining),
+        stdio: ["ignore", "pipe", "ignore"],
+        env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" }
+      }).trim();
+    };
     let branch = "";
     let detached = false;
     try {
       branch = safeText(run(["symbolic-ref", "--short", "HEAD"]), 48);
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.message === "Git deadline exceeded") {
+        return null;
+      }
       const sha = safeText(run(["rev-parse", "--short", "HEAD"]), 20);
       branch = sha;
       detached = true;
     }
-    const dirty = Boolean(run(["status", "--porcelain"]));
+    let dirty = false;
+    try {
+      dirty = Boolean(run(["status", "--porcelain"]));
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOBUFS") {
+        dirty = true;
+      } else {
+        throw error;
+      }
+    }
     let ahead = 0;
     let behind = 0;
     if (!detached) {
@@ -272,7 +295,7 @@ function getGitStatus(cwd) {
           "--left-right",
           "--count",
           "@{upstream}...HEAD"
-        ]).split(/\s+/);
+        ], REV_LIST_TIMEOUT_MS).split(/\s+/);
         ahead = Number(aheadText || 0);
         behind = Number(behindText || 0);
       } catch {
@@ -2050,18 +2073,17 @@ async function candidateFiles(dataDir) {
   } catch {
     return [];
   }
-  const files = [];
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith(".jsonl"))
-      continue;
+  const jsonlEntries = entries.filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"));
+  const stats = await Promise.all(jsonlEntries.map(async (entry) => {
     const filePath = path9.join(dataDir, entry.name);
     try {
       const stat = await fs7.stat(filePath);
-      files.push({ filePath, mtimeMs: stat.mtimeMs });
+      return { filePath, mtimeMs: stat.mtimeMs };
     } catch {
+      return null;
     }
-  }
-  return files.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, 24);
+  }));
+  return stats.filter(Boolean).sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, 24);
 }
 async function canonicalPath(value) {
   try {
@@ -2070,13 +2092,23 @@ async function canonicalPath(value) {
     return path9.resolve(value);
   }
 }
+function emptyProviderState(query = {}, now = Date.now()) {
+  const empty = foldEvents([], now);
+  empty.cwd = query.cwd || "";
+  empty.transcriptPath = query.transcriptPath || "";
+  empty.sessionId = query.sessionId || "";
+  empty.platform = query.platform || empty.platform;
+  return empty;
+}
 async function loadState(query = {}, options = {}) {
   const dataDir = options.dataDir || resolveDataDir(options.env);
   await ensurePrivateDirectory(dataDir).catch(() => void 0);
   const finish = async (state, protectedPath) => {
-    await maybeSweepPrivateFiles(dataDir, EVENT_FILE_HYGIENE, {
-      protectedPaths: protectedPath ? [protectedPath] : []
-    });
+    if (!options.signal?.aborted) {
+      await maybeSweepPrivateFiles(dataDir, EVENT_FILE_HYGIENE, {
+        protectedPaths: protectedPath ? [protectedPath] : []
+      });
+    }
     return state;
   };
   const queryCwd = query.cwd ? await canonicalPath(query.cwd) : "";
@@ -2096,11 +2128,27 @@ async function loadState(query = {}, options = {}) {
     }
   }
   const files = await candidateFiles(dataDir);
+  const canonicalCache = /* @__PURE__ */ new Map();
+  const resolveCanonical = async (target) => {
+    let resolved = canonicalCache.get(target);
+    if (resolved === void 0) {
+      resolved = await canonicalPath(target);
+      canonicalCache.set(target, resolved);
+    }
+    return resolved;
+  };
   let fallback = null;
   let fallbackPath = "";
   for (const { filePath } of files) {
+    if (options.signal?.aborted)
+      break;
     try {
-      const events = parseEvents(await readTail(filePath));
+      const text = await readTail(filePath);
+      if (!text.trim())
+        continue;
+      if (query.platform && !text.includes(`"platform":"${query.platform}"`))
+        continue;
+      const events = parseEvents(text);
       if (!events.length)
         continue;
       const state = foldEvents(events, options.now?.() ?? Date.now());
@@ -2109,7 +2157,7 @@ async function loadState(query = {}, options = {}) {
       if (query.transcriptPath && state.transcriptPath === query.transcriptPath) {
         return finish(state, filePath);
       }
-      if (queryCwd && state.cwd && await canonicalPath(state.cwd) === queryCwd) {
+      if (queryCwd && state.cwd && (state.cwd === queryCwd || await resolveCanonical(state.cwd) === queryCwd)) {
         return finish(state, filePath);
       }
       if (!queryCwd && !query.transcriptPath && !fallback) {
@@ -2119,11 +2167,7 @@ async function loadState(query = {}, options = {}) {
     } catch {
     }
   }
-  const empty = foldEvents([], options.now?.() ?? Date.now());
-  empty.cwd = query.cwd || "";
-  empty.transcriptPath = query.transcriptPath || "";
-  empty.sessionId = query.sessionId || "";
-  empty.platform = query.platform || empty.platform;
+  const empty = emptyProviderState(query, options.now?.() ?? Date.now());
   return finish(fallback || empty, fallback ? fallbackPath : void 0);
 }
 
@@ -3349,31 +3393,56 @@ async function hook(args) {
   process2.stdout.write(`${JSON.stringify(response)}
 `);
 }
+function printStatusline(text) {
+  process2.stdout.once("error", () => process2.exit(0));
+  process2.stdout.write(`${text}
+`, () => process2.exit(0));
+}
 async function statusline() {
+  const startedAt = Date.now();
   const input = await readJsonStdin();
   if (!input) return;
-  await spawnPromotionsRefresh(CLI_PATH2);
   const isAntigravity = input.product === "antigravity" || typeof input.agent_state === "string";
   const isCursor = !isAntigravity && (typeof input.autorun === "boolean" || Number.isFinite(input.render_width_chars));
-  const state = await loadState({
-    sessionId: input.session_id || input.conversation_id,
-    transcriptPath: input.transcript_path,
-    cwd: input.workspace?.current_dir || input.cwd,
-    platform: isAntigravity ? "antigravity" : isCursor ? "cursor" : "claude"
+  const platform = isAntigravity ? "antigravity" : isCursor ? "cursor" : "claude";
+  const sessionId = input.session_id || input.conversation_id || "";
+  const transcriptPath = input.transcript_path || "";
+  const cwdInput = input.workspace?.current_dir || input.cwd || "";
+  const promotionsPromise = spawnPromotionsRefresh(CLI_PATH2).catch(() => false);
+  const controller = new AbortController();
+  const query = { sessionId, transcriptPath, cwd: cwdInput, platform };
+  let timer;
+  const timeoutPromise = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve(emptyProviderState(query));
+    }, 2e3);
+    timer.unref?.();
   });
-  const cwd = input.workspace?.current_dir || input.cwd || state.cwd;
+  const state = await Promise.race([
+    loadState(query, { signal: controller.signal }),
+    timeoutPromise
+  ]);
+  if (timer) clearTimeout(timer);
+  await promotionsPromise;
+  const cwd = cwdInput || state.cwd;
+  const readGit = (targetCwd) => {
+    if (controller.signal.aborted) return null;
+    const remainingBudget = Math.max(0, 3500 - (Date.now() - startedAt));
+    if (remainingBudget < 200) return null;
+    return getGitStatus(targetCwd, Math.min(500, remainingBudget));
+  };
   if (isAntigravity) {
     const host = input;
     const snapshot2 = snapshotFromAntigravity(
       normalizeAntigravityStatus(host, state),
-      host.vcs ? null : getGitStatus(cwd),
+      host.vcs ? null : readGit(cwd),
       currentPromotion({ platform: "antigravity" })
     );
-    process2.stdout.write(`${renderSnapshot(snapshot2, {
+    printStatusline(renderSnapshot(snapshot2, {
       activity: false,
       width: finiteWidth(host.terminal_width)
-    })}
-`);
+    }));
     return;
   }
   if (isCursor) {
@@ -3382,14 +3451,13 @@ async function statusline() {
     if (plan.stale) await spawnCursorUsageRefresh(CLI_PATH2);
     const snapshot2 = snapshotFromCursor(
       normalizeCursorStatus(host, state, void 0, plan.usage),
-      getGitStatus(cwd),
+      readGit(cwd),
       currentPromotion({ platform: "cursor" })
     );
-    process2.stdout.write(`${renderSnapshot(snapshot2, {
+    printStatusline(renderSnapshot(snapshot2, {
       activity: false,
       width: finiteWidth(host.render_width_chars)
-    })}
-`);
+    }));
     return;
   }
   const endpoint = claudeApiEndpoint();
@@ -3406,11 +3474,10 @@ async function statusline() {
   }
   const snapshot = snapshotFromClaude(
     facts,
-    getGitStatus(cwd),
+    readGit(cwd),
     currentPromotion({ platform: "claude", endpoint })
   );
-  process2.stdout.write(`${renderSnapshot(snapshot, { activity: false })}
-`);
+  printStatusline(renderSnapshot(snapshot, { activity: false }));
 }
 function finiteWidth(value) {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : void 0;
