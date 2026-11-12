@@ -56,7 +56,8 @@ test("falls back to the copy bundled with the package before anything is fetched
   assert.equal(sources.sharedOrigin, "bundled");
   assert.equal(sources.sharedFetchedAt, null);
   assert.deepEqual(sources.local, []);
-  // The published schedule is deliberately empty; only its shape is a contract.
+  // The bundled copy is whatever shipped at publish time; only its shape is a
+  // contract here, since the DeepSeek entries are asserted in their own test.
   assert.ok(Array.isArray(sources.shared));
   assert.equal(sources.sharedStale, true);
 });
@@ -228,7 +229,13 @@ test("a cache fetched from another URL is not an answer for this one", async () 
   });
   const sources = promotionSources(env);
   assert.equal(sources.sharedOrigin, "bundled");
-  assert.deepEqual(sources.shared.map((entry) => entry.id), []);
+  // The mismatched cache must not answer: its "elsewhere" entry stays out, and
+  // the bundled schedule's own windows come back in its place.
+  assert.ok(!sources.shared.some((entry) => entry.id === "elsewhere"));
+  assert.ok(
+    sources.shared.some((entry) => entry.id === "deepseek-offpeak-overnight"),
+    "the fallback answered from the bundled copy, not from nothing",
+  );
   // Changing the override has to take effect now, not when the TTL expires.
   assert.equal(sources.sharedStale, true);
 });

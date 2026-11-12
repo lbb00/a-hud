@@ -123,7 +123,7 @@ Color means warning level and nothing else; brightness marks hierarchy. Green is
 
 ## Promotional windows
 
-Vendors run temporary campaigns, such as off-peak discounts or weekend bonuses, that no host reports in its status payload. Agent HUD shows them as a badge. The shared schedule lives in this repository, in [`packages/provider/promotions.json`](packages/provider/promotions.json), so a campaign is corrected once for everyone instead of in every user's config. It ships empty on purpose: a window nobody verified is worse than no badge, so entries arrive by pull request.
+Vendors run temporary campaigns, such as off-peak discounts or weekend bonuses, that no host reports in its status payload. Agent HUD shows them as a badge. The shared schedule lives in this repository, in [`packages/provider/promotions.json`](packages/provider/promotions.json), so a campaign is corrected once for everyone instead of in every user's config. It ships the DeepSeek idle-hour windows described below; anything else arrives by pull request, because a window nobody verified is worse than no badge.
 
 The schedule reaches your machine three ways, and the later ones win. A copy is fetched from this repository into `~/.agent-hud/promotions-cache.json` at most every six hours, by a background process that no status line waits on; if a fetch fails, the last good copy stays. The published package also bundles a copy, which answers before the first fetch, when the network is unavailable, and whenever it is newer than the cache. Your own `~/.agent-hud/config.json` sits on top and wins wherever the two disagree. `AGENT_HUD_NO_REMOTE=1` switches off the fetch alone; the bundled copy and your config keep working.
 
@@ -151,6 +151,19 @@ Clock times are UTC, so they can be copied from a vendor announcement unchanged;
 
 Only `start` and `end` are required. An `end` at or before `start` crosses midnight. `days` takes `0` for Sunday or three-letter names, `platforms` limits the window to some hosts, `from` and `until` bound the campaign, and `"enabled": false` switches a window off without deleting it. A local window with the same `id` as a shared one replaces it. A window whose narrowing field has an unusable value is dropped whole, so a typo never turns into a badge that shows on every host, every day.
 
+A discount that covers the complement of some hours cannot be written as one window, so it is split into several. Give those entries the same `group` and the countdown covers the whole continuous run instead of stopping at the end of whichever entry is open:
+
+```json
+{
+  "promotions": [
+    { "id": "night", "label": "50%", "group": "offpeak", "start": "18:00", "end": "09:00" },
+    { "id": "noon", "label": "50%", "group": "offpeak", "days": [1, 2, 3, 4, 5], "start": "12:00", "end": "14:00" }
+  ]
+}
+```
+
+Without a `group` a window is a group of its own: two adjacent entries that were not meant to be one discount stay separate.
+
 Some discounts belong to an API rather than to a host: the vendor bills by the clock on its own endpoint, whatever program sends the request, and the same models resold elsewhere are not part of it. Those windows take `endpoints` instead of `platforms`:
 
 ```json
@@ -164,6 +177,8 @@ Some discounts belong to an API rather than to a host: the vendor bills by the c
 ```
 
 The match is on the host part of the base URL, so `https://api.example.com/v1` and `api.example.com` are the same thing. Such a window only shows up where the host can say which endpoint the current model talks to. pi reads the selected model's `baseUrl`; Claude Code reads its inherited `ANTHROPIC_BASE_URL` and cloud-provider settings, and assumes `api.anthropic.com` only when none of them is set. Everywhere else the badge stays hidden, because a program that cannot tell must not claim the discount.
+
+DeepSeek's idle-hour pricing ships in the shared schedule: Beijing weekdays are peak 09:00-12:00 and 14:00-18:00, and everything else — nights, the noon break, and weekends — is idle at half price. The schedule models that as three endpoint-scoped `api.deepseek.com` windows, so the badge reads `%50%` whenever the idle rate applies. Chinese statutory holidays are not modeled yet: a holiday that falls on a weekday still reads as peak, because the weekday rule is the approximation in use.
 
 To see where each schedule came from, every parsed window, the filters applied, and what is active right now, run this with your own endpoint:
 
@@ -183,7 +198,7 @@ The host did not report that fact, or it does not apply. Plan quota, for example
 
 ### Why is no promotion badge shown?
 
-No window matches the current time, host, or endpoint. The shared schedule is empty until a campaign is verified, so a badge needs either a merged entry or a window in your own config. To see which windows were loaded and which filters excluded them, run from the checkout, with your own endpoint:
+No window matches the current time, host, or endpoint. Beyond the bundled DeepSeek idle-hour windows, a badge needs either a merged entry or a window in your own config. To see which windows were loaded and which filters excluded them, run from the checkout, with your own endpoint:
 
 ```bash
 node plugins/agent-hud/dist/cli.js promotions --platform claude --endpoint https://api.example.com

@@ -3,6 +3,17 @@
 All notable user-visible changes to Agent HUD are documented here. The project
 uses semantic versioning for each published workspace package.
 
+## Unreleased
+
+### Added
+
+- Bundled DeepSeek idle-hour (off-peak) windows for `api.deepseek.com`: outside Beijing weekday peak hours (09:00-12:00 and 14:00-18:00), pi and other endpoint-aware hosts show a green `%50%` badge counting down the idle stretch. Chinese statutory holidays are not modeled yet, so a holiday that falls on a weekday still reads as peak.
+- A `group` field on promotional windows. Entries sharing a group are one continuous discount split across several windows, because quiet hours are the complement of other hours and cannot be spelled as a single entry; the countdown then covers the whole run instead of stopping at the end of whichever entry is open.
+
+### Changed
+
+- pi's footer paints a not-yet-open window in the theme accent instead of the dim grey it used before, which was illegible against the rest of the footer. Peak hours are now readable without borrowing the warning hue. The three-line HUD keeps its plain, uncolored pending token.
+
 ## a-hud 0.5.1 and @agent-hud/provider 0.3.1 - 2026-11-09
 
 ### Fixed

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
-  readPromotionWindows,
+  promotionSources,
   resolveConfigPath,
   resolvePromotion,
 } from "../dist/index.js";
@@ -13,7 +13,9 @@ async function configEnv(contents) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agent-hud-promotions-"));
   const filePath = path.join(directory, "config.json");
   if (contents != null) await fs.writeFile(filePath, contents, "utf8");
-  return { AGENT_HUD_CONFIG: filePath };
+  // The data dir is pinned so the shared schedule never bleeds the developer's
+  // own ~/.agent-hud cache into these local-config assertions.
+  return { AGENT_HUD_CONFIG: filePath, AGENT_HUD_DATA_DIR: directory };
 }
 
 function utcSeconds(year, month, day, hour = 0, minute = 0) {
@@ -32,9 +34,9 @@ test("resolves the config path from the data directory or an explicit override",
 });
 
 test("treats a missing or malformed config as no configured windows", async () => {
-  assert.deepEqual(readPromotionWindows(await configEnv(null)), []);
-  assert.deepEqual(readPromotionWindows(await configEnv("{ not json")), []);
-  assert.deepEqual(readPromotionWindows(await configEnv('{"promotions":"nope"}')), []);
+  assert.deepEqual(promotionSources(await configEnv(null)).local, []);
+  assert.deepEqual(promotionSources(await configEnv("{ not json")).local, []);
+  assert.deepEqual(promotionSources(await configEnv('{"promotions":"nope"}')).local, []);
 });
 
 test("accepts both config shapes and drops unusable entries", async () => {
@@ -46,13 +48,13 @@ test("accepts both config shapes and drops unusable entries", async () => {
       { id: "named-days", start: "09:00", end: "18:00", days: ["Sat", "sun", 9] },
     ],
   }));
-  const windows = readPromotionWindows(env);
+  const windows = promotionSources(env).local;
   assert.deepEqual(windows.map((window) => window.id), ["promotion-1", "named-days"]);
   assert.deepEqual(windows[1].days, [6, 0]);
 
-  const bare = readPromotionWindows(
+  const bare = promotionSources(
     await configEnv(JSON.stringify([{ id: "x", start: "01:00", end: "02:00" }])),
-  );
+  ).local;
   assert.deepEqual(bare.map((window) => window.id), ["x"]);
 });
 
@@ -63,7 +65,7 @@ test("a mistyped timezone drops only its own window", async () => {
       { id: "good", label: "OK", start: "00:00", end: "23:59" },
     ],
   }));
-  const windows = readPromotionWindows(env);
+  const windows = promotionSources(env).local;
   assert.deepEqual(windows.map((window) => window.id), ["good"]);
   // Intl throws on an unknown zone, which used to hide every other window and
   // abort the diagnostic that was supposed to explain the missing badge.
@@ -83,7 +85,7 @@ test("strips control sequences and unbounded text from schedule fields", async (
       end: "02:00",
     }],
   }));
-  const [window] = readPromotionWindows(env);
+  const [window] = promotionSources(env).local;
   // The shared schedule arrives over the network, so nothing from it may reach
   // a terminal as an escape sequence or an unbounded string.
   const text = window.id + window.label + window.platforms.join("");
@@ -100,14 +102,17 @@ test("a config that is not a readable small file reads as no windows", async () 
   // A directory or a FIFO at the config path would throw or block a repaint.
   const asDirectory = path.join(directory, "config.json");
   await fs.mkdir(asDirectory);
-  assert.deepEqual(readPromotionWindows({ AGENT_HUD_CONFIG: asDirectory }), []);
+  assert.deepEqual(
+    promotionSources({ AGENT_HUD_CONFIG: asDirectory, AGENT_HUD_DATA_DIR: directory }).local,
+    [],
+  );
 
   const entry = { id: "kept", label: "50%", start: "01:00", end: "02:00" };
   const huge = { promotions: [entry], note: "x".repeat(70 * 1024) };
-  assert.deepEqual(readPromotionWindows(await configEnv(JSON.stringify(huge))), []);
+  assert.deepEqual(promotionSources(await configEnv(JSON.stringify(huge))).local, []);
   // The same schedule under the cap still reads, so the cap is what dropped it.
   assert.deepEqual(
-    readPromotionWindows(await configEnv(JSON.stringify({ promotions: [entry] }))),
+    promotionSources(await configEnv(JSON.stringify({ promotions: [entry] }))).local,
     [entry],
   );
 });
@@ -124,7 +129,7 @@ test("drops a window whose narrowing fields are unusable", async () => {
       { id: "kept", start: "00:00", end: "23:59", platforms: ["claude"], days: [4] },
     ],
   }));
-  assert.deepEqual(readPromotionWindows(env).map((window) => window.id), ["kept"]);
+  assert.deepEqual(promotionSources(env).local.map((window) => window.id), ["kept"]);
 });
 
 test("never coerces schedule values that could throw on the render path", async () => {
@@ -135,7 +140,7 @@ test("never coerces schedule values that could throw on the render path", async 
   );
   // String() on a deeply nested array overflows the stack, which used to take
   // out every other window with it.
-  assert.deepEqual(readPromotionWindows(env), []);
+  assert.deepEqual(promotionSources(env).local, []);
 });
 
 test("caps how many windows one schedule can contribute", async () => {
@@ -146,7 +151,7 @@ test("caps how many windows one schedule can contribute", async () => {
   }));
   const env = await configEnv(JSON.stringify({ promotions: many }));
   // Each window costs a dozen zone conversions per repaint.
-  assert.equal(readPromotionWindows(env).length, 64);
+  assert.equal(promotionSources(env).local.length, 64);
 });
 
 test("reads config hours as UTC when no timezone is given", () => {
@@ -353,12 +358,11 @@ test("a window bound to an API endpoint stays hidden until the caller names one"
 
 test("an endpoint list that cannot narrow anything drops its window", async () => {
   const kept = { id: "kept", label: "50%", start: "01:00", end: "02:00" };
-  for (const endpoints of [[], "api.deepseek.com", [""], [{}]]) {
-    const env = await configEnv(
+  for (const endpoints of [[], "api.deepseek.com", [""], [{}]]) {    const env = await configEnv(
       JSON.stringify({ promotions: [{ ...kept, id: "bad", endpoints }, kept] }),
     );
     assert.deepEqual(
-      readPromotionWindows(env).map((window) => window.id),
+      promotionSources(env).local.map((window) => window.id),
       ["kept"],
       JSON.stringify(endpoints),
     );
@@ -367,7 +371,78 @@ test("an endpoint list that cannot narrow anything drops its window", async () =
   const env = await configEnv(
     JSON.stringify({ promotions: [{ ...kept, endpoints: ["HTTPS://Api.DeepSeek.com/v1"] }] }),
   );
-  assert.deepEqual(readPromotionWindows(env)[0].endpoints, ["api.deepseek.com"]);
+  assert.deepEqual(promotionSources(env).local[0].endpoints, ["api.deepseek.com"]);
+});
+
+test("a group merges only the windows that name it", async () => {
+  // Two halves of one discount plus an unrelated campaign of the same shape.
+  // Joining by anything implicit (same label, adjacent hours) would silently
+  // absorb the stranger into the run and report the wrong end.
+  const env = await configEnv(JSON.stringify({
+    promotions: [
+      { id: "first", label: "50%", group: "run", start: "00:00", end: "01:00" },
+      { id: "second", label: "50%", group: "run", start: "01:00", end: "02:00" },
+      { id: "stranger", label: "50%", start: "02:00", end: "03:00" },
+    ],
+  }));
+  const windows = promotionSources(env).local;
+  const status = resolvePromotion(windows, { now: utcSeconds(2026, 9, 3, 0, 30) });
+  // 00:00-01:00 chains into 01:00-02:00 but stops there.
+  assert.equal(status.changesAt, utcSeconds(2026, 9, 3, 2, 0));
+  assert.equal(resolvePromotion(windows, { now: utcSeconds(2026, 9, 3, 0, 30) }).id, "first");
+});
+
+test("a group that is not a usable string drops its window", async () => {
+  const expected = ["kept"];
+  for (const group of ["", "   ", 7, [], {}]) {
+    const env = await configEnv(JSON.stringify({
+      promotions: [
+        { id: "bad", label: "50%", group, start: "00:00", end: "23:59" },
+        { id: "kept", label: "50%", start: "00:00", end: "23:59" },
+      ],
+    }));
+    assert.deepEqual(
+      promotionSources(env).local.map((window) => window.id),
+      expected,
+      JSON.stringify(group),
+    );
+  }
+});
+
+test("a shared id is not the same thing as a shared group", async () => {
+  // Ids are user-chosen and not unique across the file, so an undeclared
+  // window must stay a group of its own. Joining by id would silently chain
+  // two entries that only happen to share a name.
+  const env = await configEnv(JSON.stringify({
+    promotions: [
+      { id: "same", label: "50%", start: "22:00", end: "23:00" },
+      { id: "same", label: "50%", start: "23:00", end: "23:30" },
+    ],
+  }));
+  const windows = promotionSources(env).local;
+  assert.equal(windows.length, 2);
+  // 22:30 sits in the first entry only, so the run ends when it does.
+  assert.equal(
+    resolvePromotion(windows, { now: utcSeconds(2026, 9, 3, 22, 30) }).changesAt,
+    utcSeconds(2026, 9, 3, 23, 0),
+  );
+});
+
+test("a window whose id spells another window's group is not absorbed", async () => {
+  const env = await configEnv(JSON.stringify({
+    promotions: [
+      { id: "a", label: "50%", group: "peak", start: "00:00", end: "06:00" },
+      { id: "b", label: "50%", group: "peak", start: "06:00", end: "12:00" },
+      // No group of its own; its id merely matches the name above.
+      { id: "peak", label: "50%", start: "12:00", end: "18:00" },
+    ],
+  }));
+  const windows = promotionSources(env).local;
+  // 03:00 is inside the a+b group, which ends at 12:00, not at 18:00.
+  assert.equal(
+    resolvePromotion(windows, { now: utcSeconds(2026, 9, 3, 3, 0) }).changesAt,
+    utcSeconds(2026, 9, 3, 12, 0),
+  );
 });
 
 test("prefers an open window over a pending one, in configured order", () => {

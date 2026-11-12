@@ -33,6 +33,14 @@ export interface PromotionWindow {
   id: string;
   /** Short user-chosen badge text, e.g. "50%". */
   label: string;
+  /**
+   * Windows sharing a group are one continuous discount written as several
+   * entries, because a schedule of quiet hours is the complement of other
+   * hours and cannot be spelled as a single window. The badge then counts down
+   * to the end of the whole run instead of the end of whichever entry happens
+   * to be open. Omitted means the window is a group of its own.
+   */
+  group?: string;
   /** Hosts this window applies to. Omitted means every host. */
   platforms?: Platform[];
   /**
@@ -154,6 +162,13 @@ function normalizeWindow(value: unknown, index: number): PromotionWindow | null 
     const timezone = safeText(raw.timezone, 64);
     if (!timezone || !knownZone(timezone)) return null;
     window.timezone = timezone;
+  }
+  if (raw.group !== undefined) {
+    const group = safeText(raw.group, 64);
+    // Present but unusable drops the window, like every other narrowing field:
+    // reading it as "no group" would silently change what the countdown means.
+    if (!group) return null;
+    window.group = group;
   }
   if (raw.platforms !== undefined) {
     if (!Array.isArray(raw.platforms)) return null;
@@ -329,16 +344,45 @@ export function resolvePromotion(
     (!window.endpoints?.length ||
       (endpoint !== "" && window.endpoints.includes(endpoint)))
   );
-  let pending: Occurrence | null = null;
+  // One schedule pass per window, then the same occurrences bucketed by group:
+  // an open run has to be measured across every entry that continues it, or a
+  // discount split into several windows reports the end of the first one.
+  const occurrencesByWindow = new Map<PromotionWindow, Occurrence[]>();
+  // The key is either the declared group name or the window itself: keying an
+  // undeclared window by its id would merge two entries that merely share an
+  // id, and would pull in a window whose id happens to spell someone's group.
+  const byGroup = new Map<string | PromotionWindow, Occurrence[]>();
+  const groupSize = new Map<string | PromotionWindow, number>();
   for (const window of applicable) {
     const occurrences = occurrencesFor(window, now);
+    occurrencesByWindow.set(window, occurrences);
+    const key = window.group === undefined ? window : `group:${window.group}`;
+    const bucket = byGroup.get(key);
+    if (bucket) bucket.push(...occurrences);
+    else byGroup.set(key, [...occurrences]);
+    groupSize.set(key, (groupSize.get(key) ?? 0) + 1);
+  }
+  // runEnd chains in one ascending pass, so the merged run has to be sorted.
+  for (const bucket of byGroup.values()) {
+    bucket.sort((left, right) => left.startsAt - right.startsAt);
+  }
+  let pending: Occurrence | null = null;
+  for (const window of applicable) {
+    const occurrences = occurrencesByWindow.get(window) ?? [];
     for (const occurrence of occurrences) {
       if (occurrence.startsAt <= now && now < occurrence.endsAt) {
+        const key = window.group === undefined ? window : `group:${window.group}`;
         return {
           id: window.id,
           label: window.label,
           active: true,
-          changesAt: runEnd(occurrences, occurrence, now),
+          changesAt: runEnd(
+            byGroup.get(key) ?? occurrences,
+            occurrence,
+            now,
+            // Only a group of one can trust the single-window horizon tail.
+            { horizon: (groupSize.get(key) ?? 1) === 1 },
+          ),
         };
       }
       if (

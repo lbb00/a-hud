@@ -83,6 +83,7 @@ function describe(window: PromotionWindow, origin: string): void {
     window.timezone || "UTC",
     window.platforms?.join(",") || "all hosts",
     window.endpoints?.join(",") || "",
+    window.group ? `group ${window.group}` : "",
     window.days ? `days ${window.days.join(",")}` : "",
     window.from || window.until ? `${window.from || "…"}..${window.until || "…"}` : "",
   ].filter(Boolean).join("  ");

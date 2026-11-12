@@ -90,6 +90,29 @@ test("paints an open window into pi's own footer, in pi's success color", async 
   });
 });
 
+test("a window that has not opened yet stays legible as peak", async (t) => {
+  // 2026-11-12 15:00 Beijing is a weekday peak hour, so the noon break window
+  // is closed and pi paints a countdown to tomorrow's. Dim made that segment
+  // read as absent against the footer, which is the whole complaint.
+  t.mock.timers.enable({ apis: ["Date"], now: Date.UTC(2026, 10, 12, 7, 0) });
+  const noon = {
+    id: "noon",
+    label: "50%",
+    timezone: "Asia/Shanghai",
+    days: [1, 2, 3, 4, 5],
+    start: "12:00",
+    end: "14:00",
+    endpoints: ["api.deepseek.com"],
+  };
+  await withConfig([noon], () => {
+    const pi = fakePi("https://api.deepseek.com");
+    piExtension(pi.api);
+    pi.fire("session_start");
+    assert.match(pi.painted[0][1], /^<accent>%50% ↑/);
+    pi.fire("session_shutdown");
+  });
+});
+
 test("a window belonging to another host leaves pi's footer alone", async () => {
   await withConfig([{ ...ALL_DAY, platforms: ["claude"] }], () => {
     const pi = fakePi();
@@ -118,7 +141,9 @@ test("the countdown keeps repainting a session that sits idle", async (t) => {
   });
 });
 
-test("a discount billed on one API is not claimed on another", async () => {
+test("a discount billed on one API is not claimed on another", async (t) => {
+  // The clock is pinned because the segment's tint depends on the hour.
+  t.mock.timers.enable({ apis: ["Date"], now: Date.UTC(2026, 10, 12, 7, 0) });
   await withConfig([{ ...ALL_DAY, endpoints: ["api.deepseek.com"] }], () => {
     // The same models reached through a reseller are not part of the vendor's
     // campaign, so the endpoint decides, not the model name or the host.
@@ -213,7 +238,7 @@ test("a pi-only user still fetches the shared schedule", async () => {
   }, { AGENT_HUD_NO_REMOTE: undefined, AGENT_HUD_PROMOTIONS_URL: url });
 });
 
-test("pi reports the vendor incident for the API its own model calls", async () => {
+test("pi reports the vendor incident for the API its own model calls", async (t) => {
   await withConfig([], async (directory) => {
     // Written by whichever host refreshed it last: the fact belongs to the API,
     // so a pi-only user reads the same file a Claude Code session would.
@@ -229,12 +254,16 @@ test("pi reports the vendor incident for the API its own model calls", async () 
     assert.equal(anthropic.painted.at(-1)[1], "<error>!Anthropic");
     anthropic.fire("session_shutdown");
 
-    // A model on another API gets no signal rather than Anthropic's.
+    // A model on another API gets no signal rather than Anthropic's. It may
+    // still carry its own API's promotional badge, so only Anthropic is ruled
+    // out here, not the whole segment. The clock is pinned so the badge itself
+    // is a fixed string rather than whatever the hour happens to render.
+    t.mock.timers.enable({ apis: ["Date"], now: Date.UTC(2026, 10, 12, 7, 0) });
     const elsewhere = fakePi("https://api.deepseek.com");
     piExtension(elsewhere.api);
     elsewhere.fire("session_start");
     await settle(elsewhere, 2);
-    assert.equal(elsewhere.painted.at(-1)[1], undefined);
+    assert.equal(elsewhere.painted.at(-1)[1], "<accent>%50% ↑3h00");
     elsewhere.fire("session_shutdown");
   });
 });
