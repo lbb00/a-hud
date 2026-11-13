@@ -193,12 +193,18 @@ export function runEnd(
   occurrences: Occurrence[],
   active: Occurrence,
   now: number,
+  options: { horizon?: boolean } = {},
 ): number | null {
   let end = active.endsAt;
   // Occurrences come out in ascending order, so one pass chains the whole run.
   for (const occurrence of occurrences) {
     if (occurrence.startsAt <= end && occurrence.endsAt > end) end = occurrence.endsAt;
   }
+  // The tail below reads one window's own `days` and `until`, so it only
+  // answers for a run that one window carries. A grouped run that leaves the
+  // scan keeps the end it reached: the same answer whichever entry happens to
+  // be open, and no date invented past what was actually measured.
+  if (options.horizon === false) return end;
   const bounds = windowBounds(active.window);
   if (!bounds) return end;
   const base = scanBase(bounds.zone, now);

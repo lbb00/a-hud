@@ -1,6 +1,51 @@
 {
   "version": 1,
-  "updated": "2026-09-04",
-  "notes": "Shared promotional windows. Vendor campaigns appear in no host's status payload and change without notice, so they are maintained here by pull request instead of being hardcoded in the runtime. Clock times are UTC unless a window sets \"timezone\". This list ships empty on purpose: an unverified window is worse than no badge. See the README for the field reference.",
-  "promotions": []
+  "updated": "2026-11-12",
+  "notes": "Shared promotional windows. Vendor campaigns appear in no host's status payload and change without notice, so they are maintained here by pull request instead of being hardcoded in the runtime. Clock times are UTC unless a window sets \"timezone\". DeepSeek's idle-hour pricing is permanent: Beijing weekdays (Monday to Friday) 09:00-12:00 and 14:00-18:00 are peak, and every other hour, weekends included, is idle at half price. Chinese statutory holidays are not modeled yet, so a holiday that falls on a weekday still reads as peak. The three idle-hour entries share \"group\": \"deepseek-offpeak\", so the countdown covers the whole continuous idle stretch instead of stopping at the end of whichever entry is open. See the README for the field reference.",
+  "promotions": [
+    {
+      "id": "deepseek-offpeak-overnight",
+      "label": "50%",
+      "group": "deepseek-offpeak",
+      "endpoints": [
+        "api.deepseek.com"
+      ],
+      "timezone": "Asia/Shanghai",
+      "start": "18:00",
+      "end": "09:00"
+    },
+    {
+      "id": "deepseek-offpeak-weekday-noon",
+      "label": "50%",
+      "group": "deepseek-offpeak",
+      "endpoints": [
+        "api.deepseek.com"
+      ],
+      "timezone": "Asia/Shanghai",
+      "days": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "start": "12:00",
+      "end": "14:00"
+    },
+    {
+      "id": "deepseek-offpeak-weekend",
+      "label": "50%",
+      "group": "deepseek-offpeak",
+      "endpoints": [
+        "api.deepseek.com"
+      ],
+      "timezone": "Asia/Shanghai",
+      "days": [
+        0,
+        6
+      ],
+      "start": "00:00",
+      "end": "00:00"
+    }
+  ]
 }

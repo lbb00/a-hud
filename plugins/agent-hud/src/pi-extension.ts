@@ -90,7 +90,13 @@ export default function (pi: PiExtensionApi): void {
         ? tint(ctx, healthSeverity(health) === "red" ? "error" : "warning", incident)
         : "",
       promotionLabel
-        ? tint(ctx, promotion?.active ? "success" : "dim", promotionLabel)
+        // Green marks a discount in effect. A window that has not opened yet
+        // used to render dim, which on pi's own footer reads as no segment at
+        // all: the reader cannot tell peak from off-peak without already
+        // knowing what the arrow means. Accent keeps it legible without
+        // borrowing the warning hue, which this HUD reserves for vendor
+        // incidents on the same line.
+        ? tint(ctx, promotion?.active ? "success" : "accent", promotionLabel)
         : "",
     ].filter(Boolean);
     ctx.ui.setStatus(STATUS_KEY, parts.length ? parts.join(" ") : undefined);

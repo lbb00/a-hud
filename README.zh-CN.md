@@ -123,7 +123,7 @@ agent-hud | main*↑2 | +128/-17 | /workspace/agent-hud
 
 ## 优惠时段
 
-厂商会做限时活动，比如错峰折扣、周末加量，这些不会出现在任何宿主的状态数据里。Agent HUD 把它们显示成一个徽标。共享时段表放在仓库的 [`packages/provider/promotions.json`](packages/provider/promotions.json)，改一次所有人生效，不用每个人各配一遍。这份表故意是空的：写一条没核实过的时段比不显示更糟，所以条目走 PR 提交。
+厂商会做限时活动，比如错峰折扣、周末加量，这些不会出现在任何宿主的状态数据里。Agent HUD 把它们显示成一个徽标。共享时段表放在仓库的 [`packages/provider/promotions.json`](packages/provider/promotions.json)，改一次所有人生效，不用每个人各配一遍。表里内置了下面说的 DeepSeek 错峰窗口；其余条目走 PR 提交，因为写一条没核实过的时段比不显示更糟。
 
 这张表通过三条路到你机器上，后面的覆盖前面的。一是从仓库抓取后缓存到 `~/.agent-hud/promotions-cache.json`，最多六小时刷新一次，由后台进程完成，状态栏不会等它；抓取失败时上一份好的副本继续用。二是随包发布的内置副本，在第一次抓取之前、没网的时候，以及它比缓存新的时候顶上。三是你自己的 `~/.agent-hud/config.json`，叠在最上层，和共享表冲突时你的配置赢。`AGENT_HUD_NO_REMOTE=1` 只关掉抓取，内置副本和你的配置照常工作。
 
@@ -151,6 +151,19 @@ agent-hud | main*↑2 | +128/-17 | /workspace/agent-hud
 
 必填的只有 `start` 和 `end`；`end` 不晚于 `start` 表示跨零点。`days` 可以写 `0`（周日）到 `6`，也可以写三字母缩写；`platforms` 限定只对某些宿主生效；`from` 和 `until` 圈定活动起止日期；`"enabled": false` 可以临时关掉一条而不用删。本地条目的 `id` 和共享表某条相同时，本地那条取代它。用来限定范围的字段写错时，这一条窗口整条被丢掉，不会退化成"不限制"而在所有宿主、所有日子都显示。
 
+如果一个优惠覆盖的是某些时段之外的全部时间，它就没法写成一条窗口，只能拆成几条。给这几条相同的 `group`，倒计时就会覆盖整段连续的优惠，而不是停在其中某一条自己结束的时刻：
+
+```json
+{
+  "promotions": [
+    { "id": "night", "label": "50%", "group": "offpeak", "start": "18:00", "end": "09:00" },
+    { "id": "noon", "label": "50%", "group": "offpeak", "days": [1, 2, 3, 4, 5], "start": "12:00", "end": "14:00" }
+  ]
+}
+```
+
+不写 `group` 时，每条窗口自成一组：两条相邻但不是同一个优惠的窗口不会被并到一起。
+
 有些优惠属于某个 API，而不属于某个宿主：厂商按钟点给自己端点上的请求计价，不管是哪个程序发的，同样的模型经别人转售就不算。这类时段用 `endpoints` 而不是 `platforms`：
 
 ```json
@@ -164,6 +177,8 @@ agent-hud | main*↑2 | +128/-17 | /workspace/agent-hud
 ```
 
 比对的是 base URL 里的主机名，所以 `https://api.example.com/v1` 和 `api.example.com` 是同一件事。这样写的时段，只在能说清当前模型走哪个端点的宿主上显示。pi 读取所选模型的 `baseUrl`；Claude Code 读取继承到的 `ANTHROPIC_BASE_URL` 和云厂商设置，只有这些都没设时才默认 `api.anthropic.com`。其他地方一律不显示，因为说不清的程序不该替你认领这个折扣。
+
+DeepSeek 的错峰定价已内置在共享表里：北京时间工作日 09:00-12:00、14:00-18:00 为高峰，其余时间——夜间、午休和周末——都是半价空闲。共享表把它拆成三条限定 `api.deepseek.com` 的窗口，空闲时段徽标显示 `%50%`。中国法定节假日暂未建模：落在工作日的节假日仍会显示高峰，因为当前用的是“工作日”这一近似规则。
 
 想看每份时段表从哪来、解析出来的每条时段、本次用了哪些筛选条件、当前哪一条生效，换成你自己的端点运行：
 
@@ -183,7 +198,7 @@ node plugins/agent-hud/dist/cli.js promotions --platform claude --endpoint https
 
 ### 为什么看不到优惠徽标？
 
-没有时段匹配当前的时间、宿主或端点。共享表在有活动被核实之前是空的，所以要么等一条合并进去，要么在你自己的配置里写一条。想看加载了哪些时段、被哪个条件筛掉了，在仓库目录下换成你自己的端点运行：
+没有时段匹配当前的时间、宿主或端点。除了内置的 DeepSeek 错峰窗口，徽标要么等一条合并进共享表，要么在你自己的配置里写一条。想看加载了哪些时段、被哪个条件筛掉了，在仓库目录下换成你自己的端点运行：
 
 ```bash
 node plugins/agent-hud/dist/cli.js promotions --platform claude --endpoint https://api.example.com

@@ -320,9 +320,54 @@ import path2 from "node:path";
 // ../../packages/provider/dist/promotions/bundled.js
 var BUNDLED_PROMOTIONS = {
   "version": 1,
-  "updated": "2026-09-04",
-  "notes": `Shared promotional windows. Vendor campaigns appear in no host's status payload and change without notice, so they are maintained here by pull request instead of being hardcoded in the runtime. Clock times are UTC unless a window sets "timezone". This list ships empty on purpose: an unverified window is worse than no badge. See the README for the field reference.`,
-  "promotions": []
+  "updated": "2026-11-12",
+  "notes": `Shared promotional windows. Vendor campaigns appear in no host's status payload and change without notice, so they are maintained here by pull request instead of being hardcoded in the runtime. Clock times are UTC unless a window sets "timezone". DeepSeek's idle-hour pricing is permanent: Beijing weekdays (Monday to Friday) 09:00-12:00 and 14:00-18:00 are peak, and every other hour, weekends included, is idle at half price. Chinese statutory holidays are not modeled yet, so a holiday that falls on a weekday still reads as peak. The three idle-hour entries share "group": "deepseek-offpeak", so the countdown covers the whole continuous idle stretch instead of stopping at the end of whichever entry is open. See the README for the field reference.`,
+  "promotions": [
+    {
+      "id": "deepseek-offpeak-overnight",
+      "label": "50%",
+      "group": "deepseek-offpeak",
+      "endpoints": [
+        "api.deepseek.com"
+      ],
+      "timezone": "Asia/Shanghai",
+      "start": "18:00",
+      "end": "09:00"
+    },
+    {
+      "id": "deepseek-offpeak-weekday-noon",
+      "label": "50%",
+      "group": "deepseek-offpeak",
+      "endpoints": [
+        "api.deepseek.com"
+      ],
+      "timezone": "Asia/Shanghai",
+      "days": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "start": "12:00",
+      "end": "14:00"
+    },
+    {
+      "id": "deepseek-offpeak-weekend",
+      "label": "50%",
+      "group": "deepseek-offpeak",
+      "endpoints": [
+        "api.deepseek.com"
+      ],
+      "timezone": "Asia/Shanghai",
+      "days": [
+        0,
+        6
+      ],
+      "start": "00:00",
+      "end": "00:00"
+    }
+  ]
 };
 
 // ../../packages/provider/dist/promotions/remote.js
@@ -566,12 +611,14 @@ function occurrencesFor(window, now) {
   }
   return occurrences;
 }
-function runEnd(occurrences, active, now) {
+function runEnd(occurrences, active, now, options = {}) {
   let end = active.endsAt;
   for (const occurrence of occurrences) {
     if (occurrence.startsAt <= end && occurrence.endsAt > end)
       end = occurrence.endsAt;
   }
+  if (options.horizon === false)
+    return end;
   const bounds = windowBounds(active.window);
   if (!bounds)
     return end;
@@ -651,6 +698,12 @@ function normalizeWindow(value, index) {
     if (!timezone || !knownZone(timezone))
       return null;
     window.timezone = timezone;
+  }
+  if (raw.group !== void 0) {
+    const group = safeText(raw.group, 64);
+    if (!group)
+      return null;
+    window.group = group;
   }
   if (raw.platforms !== void 0) {
     if (!Array.isArray(raw.platforms))
@@ -754,16 +807,40 @@ function resolvePromotion(windows, options = {}) {
   // unstated endpoint is a caller that cannot tell which API it is billed
   // on, and that is the one case a per-endpoint campaign must not survive.
   (!window.endpoints?.length || endpoint !== "" && window.endpoints.includes(endpoint)));
-  let pending = null;
+  const occurrencesByWindow = /* @__PURE__ */ new Map();
+  const byGroup = /* @__PURE__ */ new Map();
+  const groupSize = /* @__PURE__ */ new Map();
   for (const window of applicable) {
     const occurrences = occurrencesFor(window, now);
+    occurrencesByWindow.set(window, occurrences);
+    const key = window.group === void 0 ? window : `group:${window.group}`;
+    const bucket = byGroup.get(key);
+    if (bucket)
+      bucket.push(...occurrences);
+    else
+      byGroup.set(key, [...occurrences]);
+    groupSize.set(key, (groupSize.get(key) ?? 0) + 1);
+  }
+  for (const bucket of byGroup.values()) {
+    bucket.sort((left, right) => left.startsAt - right.startsAt);
+  }
+  let pending = null;
+  for (const window of applicable) {
+    const occurrences = occurrencesByWindow.get(window) ?? [];
     for (const occurrence of occurrences) {
       if (occurrence.startsAt <= now && now < occurrence.endsAt) {
+        const key = window.group === void 0 ? window : `group:${window.group}`;
         return {
           id: window.id,
           label: window.label,
           active: true,
-          changesAt: runEnd(occurrences, occurrence, now)
+          changesAt: runEnd(
+            byGroup.get(key) ?? occurrences,
+            occurrence,
+            now,
+            // Only a group of one can trust the single-window horizon tail.
+            { horizon: (groupSize.get(key) ?? 1) === 1 }
+          )
         };
       }
       if (occurrence.startsAt > now && (!pending || occurrence.startsAt < pending.startsAt)) {
@@ -2446,6 +2523,7 @@ function describe(window, origin) {
     window.timezone || "UTC",
     window.platforms?.join(",") || "all hosts",
     window.endpoints?.join(",") || "",
+    window.group ? `group ${window.group}` : "",
     window.days ? `days ${window.days.join(",")}` : "",
     window.from || window.until ? `${window.from || "\u2026"}..${window.until || "\u2026"}` : ""
   ].filter(Boolean).join("  ");
