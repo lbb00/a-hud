@@ -39,6 +39,6 @@
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
     "publint": "^0.3.25",
-    "oxlint": "^1.87.0"
+    "oxlint": "^1.93.0"
   }
 }
